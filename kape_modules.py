@@ -818,6 +818,15 @@ def build_argument_parser() -> argparse.ArgumentParser:
         ),
     )
     parser.add_argument(
+        "--post-process",
+        metavar="NAMES",
+        help=(
+            "Comma-separated list of module names to run after all --module "
+            "modules have completed.  Post-process modules receive --mdest "
+            "as their source directory and write output back to --mdest."
+        ),
+    )
+    parser.add_argument(
         "--msync",
         nargs="?",
         const=KAPEFILES_DEFAULT_URL,
@@ -947,6 +956,70 @@ def main(argv: Optional[List[str]] = None) -> None:
     else:
         for module_name, module_file in tasks:
             _run_single_module(module_name, module_file)
+
+    # ------------------------------------------------------------------
+    # --post-process: run modules after all --module tasks have finished.
+    # The source directory for post-process modules is --mdest.
+    # ------------------------------------------------------------------
+    if args.post_process:
+        logging.info("Starting post-process modules.")
+        post_names = [n.strip() for n in args.post_process.split(",") if n.strip()]
+        post_processed_ids: Set[str] = set()
+
+        def _run_post_module(module_name: str, module_file: Path) -> None:
+            try:
+                module_data = load_module(module_file)
+                run_module(
+                    module_name,
+                    module_data,
+                    module_file,
+                    modules_dir,
+                    args.mdest,
+                    args.mdest,
+                    args.mef,
+                    mvars,
+                    args.debug,
+                    post_processed_ids,
+                    args.dry_run,
+                    num_threads,
+                )
+            except Exception as exc:  # noqa: BLE001
+                logging.error(
+                    "Error processing post-process module '%s': %s",
+                    module_name, exc,
+                )
+                if args.debug:
+                    traceback.print_exc()
+
+        post_tasks: List[tuple] = []
+        for post_name in post_names:
+            post_files = find_module_files(modules_dir, post_name)
+            if not post_files:
+                logging.warning(
+                    "Post-process module '%s' not found in %s",
+                    post_name, modules_dir,
+                )
+                continue
+            for post_file in post_files:
+                post_tasks.append((post_name, post_file))
+
+        if num_threads > 1 and len(post_tasks) > 1:
+            with ThreadPoolExecutor(max_workers=num_threads) as executor:
+                futures = {
+                    executor.submit(_run_post_module, name, mfile): name
+                    for name, mfile in post_tasks
+                }
+                for future in as_completed(futures):
+                    try:
+                        future.result()
+                    except Exception as exc:  # noqa: BLE001
+                        logging.error(
+                            "Error processing post-process module '%s': %s",
+                            futures[future], exc,
+                        )
+        else:
+            for post_name, post_file in post_tasks:
+                _run_post_module(post_name, post_file)
 
     logging.info("Done.")
 
