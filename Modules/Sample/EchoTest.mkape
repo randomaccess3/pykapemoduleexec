@@ -1,0 +1,19 @@
+Description: Sample module — lists files in the source directory using the system echo command
+Category: Sample
+Author: pykapetargetexec
+Version: 1.0
+Id: 00000000-0000-0000-0000-000000000001
+BinaryUrl: N/A
+ExportFormat: txt
+
+Processors:
+    -
+        Executable: echo
+        CommandLine: "Source=%sourceDirectory% Dest=%destinationDirectory%"
+        ExportFormat: txt
+        ExportFile: sample_output.txt
+
+# Documentation
+# This is a demonstration module that uses the built-in 'echo' command to
+# verify that variable substitution and ExportFile redirection work correctly.
+# It is not intended for forensic use.
