@@ -35,6 +35,7 @@ import traceback
 import urllib.request
 import uuid
 import zipfile
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import Dict, List, Optional, Set
 
@@ -330,6 +331,7 @@ def run_module(
     debug: bool,
     processed_ids: Set[str],
     dry_run: bool = False,
+    num_threads: int = 1,
 ) -> None:
     """
     Execute a single module (or expand a compound module).
@@ -338,6 +340,10 @@ def run_module(
     duplicate execution when compound modules reference the same module.
 
     When *dry_run* is True, commands are logged but not executed.
+
+    *num_threads* controls how many worker threads are used for concurrent
+    execution when a module processes multiple files (FileMask).  Defaults
+    to 1 (sequential execution).
     """
     module_id: str = module_data.get("Id") or ""
     if module_id and module_id in processed_ids:
@@ -375,6 +381,7 @@ def run_module(
                             debug,
                             processed_ids,
                             dry_run,
+                            num_threads,
                         )
                     except Exception as exc:  # noqa: BLE001
                         logging.error(
@@ -400,6 +407,7 @@ def run_module(
                             debug,
                             processed_ids,
                             dry_run,
+                            num_threads,
                         )
                     except Exception as exc:  # noqa: BLE001
                         logging.error(
@@ -441,7 +449,8 @@ def run_module(
                 "No files matching FileMask '%s' found in %s", file_mask, source_path
             )
             return
-        for source_file in matching_files:
+
+        def _process_file(source_file: Path) -> None:
             file_vars = dict(base_vars)
             file_vars["sourceFile"] = str(source_file)
             file_vars["fileName"] = source_file.name
@@ -454,6 +463,24 @@ def run_module(
             cmdline = substitute_variables(cmdline_template, file_vars)
             exe = find_executable(executable_name, modules_dir, module_name)
             execute_command(exe, cmdline, dest_dir, export_file, append, wait_timeout, debug, dry_run)
+
+        if num_threads > 1:
+            with ThreadPoolExecutor(max_workers=num_threads) as executor:
+                futures = {
+                    executor.submit(_process_file, sf): sf
+                    for sf in matching_files
+                }
+                for future in as_completed(futures):
+                    try:
+                        future.result()
+                    except Exception as exc:  # noqa: BLE001
+                        logging.error(
+                            "Error processing file '%s': %s",
+                            futures[future], exc,
+                        )
+        else:
+            for source_file in matching_files:
+                _process_file(source_file)
     else:
         cmdline = substitute_variables(cmdline_template, base_vars)
         exe = find_executable(executable_name, modules_dir, module_name)
@@ -780,6 +807,17 @@ def build_argument_parser() -> argparse.ArgumentParser:
         help="Show what would be executed without actually running any commands.",
     )
     parser.add_argument(
+        "--mthreads",
+        metavar="N",
+        type=int,
+        default=1,
+        help=(
+            "Number of worker threads for concurrent execution.  "
+            "When greater than 1, file-level and module-level processing "
+            "runs in parallel using a thread pool (default: 1)."
+        ),
+    )
+    parser.add_argument(
         "--msync",
         nargs="?",
         const=KAPEFILES_DEFAULT_URL,
@@ -859,32 +897,56 @@ def main(argv: Optional[List[str]] = None) -> None:
     mvars = parse_mvars(args.mvars or "")
     module_names = [n.strip() for n in args.module.split(",") if n.strip()]
     processed_ids: Set[str] = set()
+    num_threads: int = max(1, args.mthreads)
 
+    def _run_single_module(module_name: str, module_file: Path) -> None:
+        try:
+            module_data = load_module(module_file)
+            run_module(
+                module_name,
+                module_data,
+                module_file,
+                modules_dir,
+                args.msource,
+                args.mdest,
+                args.mef,
+                mvars,
+                args.debug,
+                processed_ids,
+                args.dry_run,
+                num_threads,
+            )
+        except Exception as exc:  # noqa: BLE001
+            logging.error("Error processing module '%s': %s", module_name, exc)
+            if args.debug:
+                traceback.print_exc()
+
+    # Collect (module_name, module_file) pairs to execute
+    tasks: List[tuple] = []
     for module_name in module_names:
         module_files = find_module_files(modules_dir, module_name)
         if not module_files:
             logging.warning("Module '%s' not found in %s", module_name, modules_dir)
             continue
         for module_file in module_files:
-            try:
-                module_data = load_module(module_file)
-                run_module(
-                    module_name,
-                    module_data,
-                    module_file,
-                    modules_dir,
-                    args.msource,
-                    args.mdest,
-                    args.mef,
-                    mvars,
-                    args.debug,
-                    processed_ids,
-                    args.dry_run,
-                )
-            except Exception as exc:  # noqa: BLE001
-                logging.error("Error processing module '%s': %s", module_name, exc)
-                if args.debug:
-                    traceback.print_exc()
+            tasks.append((module_name, module_file))
+
+    if num_threads > 1 and len(tasks) > 1:
+        with ThreadPoolExecutor(max_workers=num_threads) as executor:
+            futures = {
+                executor.submit(_run_single_module, name, mfile): name
+                for name, mfile in tasks
+            }
+            for future in as_completed(futures):
+                try:
+                    future.result()
+                except Exception as exc:  # noqa: BLE001
+                    logging.error(
+                        "Error processing module '%s': %s", futures[future], exc
+                    )
+    else:
+        for module_name, module_file in tasks:
+            _run_single_module(module_name, module_file)
 
     logging.info("Done.")
 
