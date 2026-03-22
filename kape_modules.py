@@ -22,12 +22,15 @@ Usage examples:
 
 import argparse
 import datetime
+import hashlib
 import io
 import logging
 import os
 import re
+import shutil
 import subprocess
 import sys
+import tempfile
 import traceback
 import urllib.request
 import uuid
@@ -600,6 +603,172 @@ def list_modules(modules_dir: Path, detail: bool = False) -> None:
 
 
 # ---------------------------------------------------------------------------
+# Module syncing (--msync)
+# ---------------------------------------------------------------------------
+
+KAPEFILES_DEFAULT_URL = (
+    "https://github.com/EricZimmerman/KapeFiles/archive/master.zip"
+)
+
+# Directories that are never overwritten or removed by sync.
+_SYNC_PRESERVE_DIRS = {"!disabled", "!local", "bin", "sample"}
+
+
+def _sha1(path: Path) -> str:
+    """Return the hex SHA-1 digest of a file."""
+    h = hashlib.sha1()
+    with open(path, "rb") as fh:
+        for chunk in iter(lambda: fh.read(8192), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+def _sha1_bytes(data: bytes) -> str:
+    """Return the hex SHA-1 digest of raw bytes."""
+    return hashlib.sha1(data).hexdigest()
+
+
+def _is_preserved_dir(rel_path: Path) -> bool:
+    """Return True if *rel_path* falls inside a preserved directory."""
+    for part in rel_path.parts:
+        if part.lower() in _SYNC_PRESERVE_DIRS:
+            return True
+    return False
+
+
+def sync_modules(modules_dir: Path, url: Optional[str] = None) -> None:
+    """Download module files from the KapeFiles repository and update *modules_dir*.
+
+    Behaviour mirrors KAPE's ``--sync`` flag:
+
+    * ``.mkape`` files from the repo are added or updated (SHA-1 comparison).
+    * Local-only ``.mkape`` files are moved to the ``!Local`` directory.
+    * The ``!Disabled``, ``!Local``, ``bin``, and ``Sample`` directories are
+      never modified by the sync process.
+    """
+    download_url = url or KAPEFILES_DEFAULT_URL
+    logging.info("Syncing modules from %s", download_url)
+
+    # ------------------------------------------------------------------
+    # 1. Download the zip archive
+    # ------------------------------------------------------------------
+    try:
+        req = urllib.request.Request(
+            download_url,
+            headers={"User-Agent": "pykapetargetexec-sync"},
+        )
+        with urllib.request.urlopen(req) as resp:  # noqa: S310
+            archive_bytes = resp.read()
+    except Exception as exc:
+        logging.error("Failed to download KapeFiles archive: %s", exc)
+        return
+
+    # ------------------------------------------------------------------
+    # 2. Extract to a temporary directory
+    # ------------------------------------------------------------------
+    try:
+        zf = zipfile.ZipFile(io.BytesIO(archive_bytes))
+    except zipfile.BadZipFile as exc:
+        logging.error("Downloaded file is not a valid zip archive: %s", exc)
+        return
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        zf.extractall(tmpdir)
+
+        # The zip usually contains a single top-level directory such as
+        # "KapeFiles-master".  Locate the Modules sub-directory inside it.
+        extracted_root = Path(tmpdir)
+        candidates = list(extracted_root.iterdir())
+        if len(candidates) == 1 and candidates[0].is_dir():
+            extracted_root = candidates[0]
+
+        remote_modules_dir = extracted_root / "Modules"
+        if not remote_modules_dir.is_dir():
+            logging.error(
+                "Modules directory not found in the downloaded archive"
+            )
+            return
+
+        # ------------------------------------------------------------------
+        # 3. Build an index of remote .mkape files (relative path -> bytes)
+        # ------------------------------------------------------------------
+        remote_files: Dict[str, bytes] = {}
+        for mkape in remote_modules_dir.rglob("*.mkape"):
+            rel = mkape.relative_to(remote_modules_dir)
+            if _is_preserved_dir(rel):
+                continue
+            remote_files[str(rel)] = mkape.read_bytes()
+
+        # ------------------------------------------------------------------
+        # 4. Build an index of existing local .mkape files
+        # ------------------------------------------------------------------
+        modules_dir.mkdir(parents=True, exist_ok=True)
+        local_files: Dict[str, Path] = {}
+        for mkape in modules_dir.rglob("*.mkape"):
+            rel = mkape.relative_to(modules_dir)
+            if _is_preserved_dir(rel):
+                continue
+            local_files[str(rel)] = mkape
+
+        # ------------------------------------------------------------------
+        # 5. Add new / update changed modules
+        # ------------------------------------------------------------------
+        added = 0
+        updated = 0
+        for rel_str, content in sorted(remote_files.items()):
+            dest_path = modules_dir / rel_str
+            if rel_str in local_files:
+                if _sha1(local_files[rel_str]) == _sha1_bytes(content):
+                    continue  # identical – nothing to do
+                logging.info("  Updated: %s", rel_str)
+                dest_path.parent.mkdir(parents=True, exist_ok=True)
+                dest_path.write_bytes(content)
+                updated += 1
+            else:
+                logging.info("  New: %s", rel_str)
+                dest_path.parent.mkdir(parents=True, exist_ok=True)
+                dest_path.write_bytes(content)
+                added += 1
+
+        # ------------------------------------------------------------------
+        # 6. Move local-only modules to !Local
+        # ------------------------------------------------------------------
+        moved = 0
+        local_dir = modules_dir / "!Local"
+        for rel_str, local_path in sorted(local_files.items()):
+            if rel_str not in remote_files:
+                local_dir.mkdir(parents=True, exist_ok=True)
+                dest_path = local_dir / Path(rel_str).name
+                if dest_path.exists():
+                    # Avoid overwriting an existing !Local file
+                    base = dest_path.stem
+                    ext = dest_path.suffix
+                    counter = 1
+                    while dest_path.exists():
+                        dest_path = local_dir / f"{base}{counter}{ext}"
+                        counter += 1
+                logging.info("  Moved to !Local: %s", rel_str)
+                shutil.move(str(local_path), str(dest_path))
+                moved += 1
+
+        # ------------------------------------------------------------------
+        # 7. Copy non-mkape files from remote Modules dir (guides, templates)
+        # ------------------------------------------------------------------
+        for item in remote_modules_dir.iterdir():
+            if item.is_file() and item.suffix.lower() != ".mkape":
+                dest = modules_dir / item.name
+                remote_content = item.read_bytes()
+                if dest.exists() and _sha1(dest) == _sha1_bytes(remote_content):
+                    continue
+                dest.write_bytes(remote_content)
+
+        logging.info(
+            "Sync complete: %d new, %d updated, %d moved to !Local",
+            added, updated, moved,
+        )
+
+
+# ---------------------------------------------------------------------------
 # --mvars parsing
 # ---------------------------------------------------------------------------
 
@@ -711,6 +880,18 @@ def build_argument_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Show what would be executed without actually running any commands.",
     )
+    parser.add_argument(
+        "--msync",
+        nargs="?",
+        const=KAPEFILES_DEFAULT_URL,
+        default=None,
+        metavar="URL",
+        help=(
+            "Sync modules from the KapeFiles GitHub repository and exit. "
+            "Optionally provide a URL to a custom fork's zip archive "
+            "(default: %(const)s)."
+        ),
+    )
     return parser
 
 
@@ -726,6 +907,13 @@ def main(argv: Optional[List[str]] = None) -> None:
 
     script_dir = Path(__file__).parent.resolve()
     modules_dir = get_modules_dir(script_dir, args.mpath)
+
+    # ------------------------------------------------------------------
+    # --msync: sync modules from KapeFiles repository and exit
+    # ------------------------------------------------------------------
+    if args.msync is not None:
+        sync_modules(modules_dir, args.msync)
+        return
 
     # ------------------------------------------------------------------
     # --mlist: enumerate modules and exit

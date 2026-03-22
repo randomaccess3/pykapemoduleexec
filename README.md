@@ -28,7 +28,12 @@ pip install -r requirements.txt
 
 Download the community KAPE module files from the
 [KapeFiles repository](https://github.com/EricZimmerman/KapeFiles/tree/master/Modules)
-and place the `Modules` directory next to `kape_modules.py`:
+and place the `Modules` directory next to `kape_modules.py`, or use the
+built-in sync command:
+
+```bash
+python kape_modules.py --msync
+```
 
 ```
 kape_modules.py
@@ -78,6 +83,7 @@ in one of these locations **before** running:
 ```
 kape_modules.py --msource PATH --mdest PATH --module NAMES [options]
 kape_modules.py --mlist [--mdetail] [--mpath PATH]
+kape_modules.py --msync [URL] [--mpath PATH]
 kape_modules.py --msync [--mpath PATH]
 ```
 
@@ -93,6 +99,7 @@ kape_modules.py --msync [--mpath PATH]
 | `--mpath PATH` | Path to the Modules directory (default: `./Modules`) |
 | `--mlist` | List available modules and exit |
 | `--mdetail` | Show full module details including binary status (use with `--mlist`) |
+| `--msync [URL]` | Sync modules from the KapeFiles GitHub repository and exit. Optionally provide a URL to a custom fork's zip archive |
 | `--msync` | Sync modules from the KapeFiles GitHub repository and exit |
 | `--debug` | Enable verbose debug output |
 
@@ -134,6 +141,16 @@ python kape_modules.py --mlist --mdetail
 python kape_modules.py \
     --mlist \
     --mpath /path/to/my/Modules
+```
+
+**Sync modules from the official KapeFiles repository:**
+```bash
+python kape_modules.py --msync
+```
+
+**Sync from a custom fork:**
+```bash
+python kape_modules.py --msync https://github.com/YourUser/KapeFiles/archive/main.zip
 ```
 
 ---
