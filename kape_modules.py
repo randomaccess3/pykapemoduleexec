@@ -64,99 +64,6 @@ def get_modules_dir(script_dir: Path, mpath: Optional[str] = None) -> Path:
 # Module sync
 # ---------------------------------------------------------------------------
 
-KAPEFILES_ZIP_URL = (
-    "https://github.com/EricZimmerman/KapeFiles/archive/refs/heads/master.zip"
-)
-_KAPEFILES_MODULES_PREFIX = "KapeFiles-master/Modules/"
-
-
-def sync_modules(
-    modules_dir: Path,
-    zip_url: str = KAPEFILES_ZIP_URL,
-    _urlopen=None,
-) -> None:
-    """
-    Sync module files from the KapeFiles GitHub repository.
-
-    Downloads the repository archive, extracts the ``Modules/`` directory and
-    updates the local *modules_dir* with the latest ``.mkape`` files and
-    directory structure.  Files that exist only locally are left untouched.
-
-    The *_urlopen* parameter is exposed for testing so callers can inject a
-    fake HTTP response without hitting the network.
-    """
-    opener = _urlopen or urllib.request.urlopen
-
-    logging.info("Syncing modules from %s …", zip_url)
-    logging.info("Local modules directory: %s", modules_dir)
-
-    # ------------------------------------------------------------------
-    # Download the ZIP archive
-    # ------------------------------------------------------------------
-    try:
-        resp = opener(zip_url)
-        zip_bytes = resp.read()
-    except Exception as exc:
-        logging.error("Failed to download KapeFiles archive: %s", exc)
-        raise
-
-    # ------------------------------------------------------------------
-    # Extract Modules/ entries
-    # ------------------------------------------------------------------
-    try:
-        zf = zipfile.ZipFile(io.BytesIO(zip_bytes))
-    except zipfile.BadZipFile as exc:
-        logging.error("Downloaded file is not a valid ZIP archive: %s", exc)
-        raise
-
-    prefix = _KAPEFILES_MODULES_PREFIX
-    added = 0
-    updated = 0
-    unchanged = 0
-
-    for info in zf.infolist():
-        # Only process entries under the Modules/ directory
-        if not info.filename.startswith(prefix):
-            continue
-
-        rel = info.filename[len(prefix):]
-        if not rel:
-            continue
-
-        dest = modules_dir / rel
-
-        # Directory entry
-        if info.filename.endswith("/"):
-            dest.mkdir(parents=True, exist_ok=True)
-            continue
-
-        # File entry — ensure parent directory exists
-        dest.parent.mkdir(parents=True, exist_ok=True)
-
-        new_content = zf.read(info.filename)
-        if dest.exists():
-            existing = dest.read_bytes()
-            if existing == new_content:
-                unchanged += 1
-                logging.debug("Unchanged: %s", rel)
-                continue
-            dest.write_bytes(new_content)
-            updated += 1
-            logging.info("Updated: %s", rel)
-        else:
-            dest.write_bytes(new_content)
-            added += 1
-            logging.info("Added: %s", rel)
-
-    zf.close()
-    logging.info(
-        "Sync complete — %d added, %d updated, %d unchanged",
-        added,
-        updated,
-        unchanged,
-    )
-
-
 # ---------------------------------------------------------------------------
 # Module file I/O
 # ---------------------------------------------------------------------------
@@ -863,14 +770,6 @@ def build_argument_parser() -> argparse.ArgumentParser:
         help="Show full module details including binary status (use with --mlist).",
     )
     parser.add_argument(
-        "--msync",
-        action="store_true",
-        help=(
-            "Sync modules from the KapeFiles GitHub repository "
-            "(https://github.com/EricZimmerman/KapeFiles) and exit."
-        ),
-    )
-    parser.add_argument(
         "--debug",
         action="store_true",
         help="Enable verbose debug output.",
@@ -924,14 +823,6 @@ def main(argv: Optional[List[str]] = None) -> None:
             sys.exit(1)
         print(f"Modules in: {modules_dir}\n")
         list_modules(modules_dir, detail=args.mdetail)
-        return
-
-    # ------------------------------------------------------------------
-    # --msync: download latest modules and exit
-    # ------------------------------------------------------------------
-    if args.msync:
-        modules_dir.mkdir(parents=True, exist_ok=True)
-        sync_modules(modules_dir)
         return
 
     # ------------------------------------------------------------------
