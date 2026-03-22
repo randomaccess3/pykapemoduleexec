@@ -44,6 +44,25 @@ Modules/
 You can also keep the Modules directory anywhere and point to it with
 `--mpath`.
 
+### Syncing modules
+
+Use `--msync` to automatically download the latest module files from the
+[KapeFiles GitHub repository](https://github.com/EricZimmerman/KapeFiles):
+
+```bash
+python kape_modules.py --msync
+```
+
+This downloads the repository archive, extracts the `Modules/` directory and
+updates (or creates) your local Modules folder.  New files are added, changed
+files are overwritten and files that exist only locally are left untouched.
+
+You can combine `--msync` with `--mpath` to sync to a custom location:
+
+```bash
+python kape_modules.py --msync --mpath /path/to/my/Modules
+```
+
 ### Placing executables
 
 Each `.mkape` file has an `Executable` field.  Place the corresponding binary
@@ -59,6 +78,7 @@ in one of these locations **before** running:
 ```
 kape_modules.py --msource PATH --mdest PATH --module NAMES [options]
 kape_modules.py --mlist [--mdetail] [--mpath PATH]
+kape_modules.py --msync [--mpath PATH]
 ```
 
 ### Arguments
@@ -73,6 +93,7 @@ kape_modules.py --mlist [--mdetail] [--mpath PATH]
 | `--mpath PATH` | Path to the Modules directory (default: `./Modules`) |
 | `--mlist` | List available modules and exit |
 | `--mdetail` | Show full module details including binary status (use with `--mlist`) |
+| `--msync` | Sync modules from the KapeFiles GitHub repository and exit |
 | `--debug` | Enable verbose debug output |
 
 ### Examples
