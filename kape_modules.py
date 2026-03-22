@@ -238,6 +238,7 @@ def execute_command(
     append: bool,
     wait_timeout: int,
     debug: bool,
+    dry_run: bool = False,
 ) -> None:
     """
     Run *executable* with *cmdline*.
@@ -247,8 +248,18 @@ def execute_command(
     file name is chosen to avoid collisions).
 
     *wait_timeout* is the maximum number of **minutes** to wait (0 = unlimited).
+
+    When *dry_run* is True the command is logged but **not** executed.
     """
     full_cmd = _build_command_string(executable, cmdline)
+
+    if dry_run:
+        logging.info("    [DRY RUN] Would execute: %s", full_cmd)
+        if export_file:
+            logging.info("    [DRY RUN] Output would be written to: %s",
+                         os.path.join(dest_dir, export_file))
+        return
+
     logging.info("    Executing: %s", full_cmd)
 
     timeout_secs: Optional[float] = (wait_timeout * 60) if wait_timeout > 0 else None
@@ -308,12 +319,15 @@ def run_module(
     mvars: Dict[str, str],
     debug: bool,
     processed_ids: Set[str],
+    dry_run: bool = False,
 ) -> None:
     """
     Execute a single module (or expand a compound module).
 
     *processed_ids* tracks module GUIDs that have already run, preventing
     duplicate execution when compound modules reference the same module.
+
+    When *dry_run* is True, commands are logged but not executed.
     """
     module_id: str = module_data.get("Id") or ""
     if module_id and module_id in processed_ids:
@@ -350,6 +364,7 @@ def run_module(
                             mvars,
                             debug,
                             processed_ids,
+                            dry_run,
                         )
                     except Exception as exc:  # noqa: BLE001
                         logging.error(
@@ -374,6 +389,7 @@ def run_module(
                             mvars,
                             debug,
                             processed_ids,
+                            dry_run,
                         )
                     except Exception as exc:  # noqa: BLE001
                         logging.error(
@@ -400,7 +416,8 @@ def run_module(
     wait_timeout: int = module_data.get("WaitTimeout") or 0
 
     dest_dir = os.path.join(mdest, category)
-    os.makedirs(dest_dir, exist_ok=True)
+    if not dry_run:
+        os.makedirs(dest_dir, exist_ok=True)
 
     source_path = Path(msource).resolve()
     script_dir = Path(__file__).parent.resolve()
@@ -426,11 +443,11 @@ def run_module(
 
             cmdline = substitute_variables(cmdline_template, file_vars)
             exe = find_executable(executable_name, modules_dir, module_name)
-            execute_command(exe, cmdline, dest_dir, export_file, append, wait_timeout, debug)
+            execute_command(exe, cmdline, dest_dir, export_file, append, wait_timeout, debug, dry_run)
     else:
         cmdline = substitute_variables(cmdline_template, base_vars)
         exe = find_executable(executable_name, modules_dir, module_name)
-        execute_command(exe, cmdline, dest_dir, export_file, append, wait_timeout, debug)
+        execute_command(exe, cmdline, dest_dir, export_file, append, wait_timeout, debug, dry_run)
 
 
 # ---------------------------------------------------------------------------
@@ -581,6 +598,11 @@ def build_argument_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Enable verbose debug output.",
     )
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Show what would be executed without actually running any commands.",
+    )
     return parser
 
 
@@ -636,7 +658,8 @@ def main(argv: Optional[List[str]] = None) -> None:
         logging.error("Source directory does not exist: %s", args.msource)
         sys.exit(1)
 
-    os.makedirs(args.mdest, exist_ok=True)
+    if not args.dry_run:
+        os.makedirs(args.mdest, exist_ok=True)
 
     mvars = parse_mvars(args.mvars or "")
     module_names = [n.strip() for n in args.module.split(",") if n.strip()]
@@ -661,6 +684,7 @@ def main(argv: Optional[List[str]] = None) -> None:
                     mvars,
                     args.debug,
                     processed_ids,
+                    args.dry_run,
                 )
             except Exception as exc:  # noqa: BLE001
                 logging.error("Error processing module '%s': %s", module_name, exc)
