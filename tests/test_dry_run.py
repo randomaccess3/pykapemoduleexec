@@ -236,8 +236,7 @@ class TestMainDryRun:
             "    ExportFormat: csv\n"
         )
 
-        with patch("kape_modules.subprocess.run") as mock_run, \
-             patch("kape_modules.Path.__file__", tmp_path, create=True):
+        with patch("kape_modules.subprocess.run") as mock_run:
             kape_modules.main([
                 "--msource", str(src),
                 "--mdest", str(dest),
