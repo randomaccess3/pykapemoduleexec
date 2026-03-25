@@ -905,6 +905,17 @@ def parse_mvars(mvars_str: str) -> Dict[str, str]:
 # ---------------------------------------------------------------------------
 
 
+def _parse_bool_arg(value: str) -> bool:
+    """Parse a TRUE/FALSE string into a Python bool for argparse."""
+    if value.upper() == "TRUE":
+        return True
+    if value.upper() == "FALSE":
+        return False
+    raise argparse.ArgumentTypeError(
+        f"Expected TRUE or FALSE, got {value!r}"
+    )
+
+
 def build_argument_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="kape_modules.py",
@@ -1025,12 +1036,15 @@ def build_argument_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--mflush",
-        action=argparse.BooleanOptionalAction,
+        nargs="?",
+        const=True,
         default=True,
+        type=_parse_bool_arg,
+        metavar="TRUE|FALSE",
         help=(
             "When true, deletes the directory specified by --mdest "
-            "(if it exists) before processing files (default: true).  "
-            "Use --no-mflush to disable."
+            "(if it exists) before processing files (default: TRUE).  "
+            "Use --mflush FALSE to disable."
         ),
     )
     return parser

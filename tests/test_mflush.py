@@ -72,10 +72,10 @@ class TestMflushArgument:
         )
         assert args.mflush is True
 
-    def test_no_mflush(self):
+    def test_mflush_false(self):
         parser = kape_modules.build_argument_parser()
         args = parser.parse_args(
-            ["--no-mflush", "--msource", "/s", "--mdest", "/d", "--module", "X"]
+            ["--mflush", "FALSE", "--msource", "/s", "--mdest", "/d", "--module", "X"]
         )
         assert args.mflush is False
 
@@ -114,10 +114,10 @@ class TestMflushExecution:
         assert dest.is_dir()
         assert "--mflush" in caplog.text
 
-    def test_no_mflush_preserves_existing_mdest(
+    def test_mflush_false_preserves_existing_mdest(
         self, tmp_dirs, sample_module_dir
     ):
-        """With --no-mflush, existing files in mdest are preserved."""
+        """With --mflush FALSE, existing files in mdest are preserved."""
         src, dest = tmp_dirs
         marker = dest / "old_output.txt"
         marker.write_text("keep me")
@@ -125,7 +125,7 @@ class TestMflushExecution:
         with patch("subprocess.run"):
             kape_modules.main(
                 [
-                    "--no-mflush",
+                    "--mflush", "FALSE",
                     "--msource", str(src),
                     "--mdest", str(dest),
                     "--module", "TestMod",
