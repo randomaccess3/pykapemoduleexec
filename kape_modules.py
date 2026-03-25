@@ -989,6 +989,16 @@ def build_argument_parser() -> argparse.ArgumentParser:
             "runner looks for 'platform_map.yaml' next to this script."
         ),
     )
+    parser.add_argument(
+        "--mflush",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help=(
+            "When true, deletes the directory specified by --mdest "
+            "(if it exists) before processing files (default: true).  "
+            "Use --no-mflush to disable."
+        ),
+    )
     return parser
 
 
@@ -1052,6 +1062,9 @@ def main(argv: Optional[List[str]] = None) -> None:
         sys.exit(1)
 
     if not args.dry_run:
+        if args.mflush and os.path.isdir(args.mdest):
+            logging.info("--mflush: removing destination directory %s", args.mdest)
+            shutil.rmtree(args.mdest)
         os.makedirs(args.mdest, exist_ok=True)
 
     mvars = parse_mvars(args.mvars or "")
