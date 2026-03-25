@@ -160,7 +160,9 @@ def apply_platform_mapping(
         exe_dir = os.path.dirname(executable)
         if exe_dir:
             parts = new_cmdline.split(None, 1)
-            if parts and not os.path.isabs(parts[0]) and "." in os.path.basename(parts[0]):
+            if (parts and not os.path.isabs(parts[0])
+                    and not parts[0].startswith("-")
+                    and "." in os.path.basename(parts[0])):
                 resolved = os.path.join(exe_dir, parts[0])
                 new_cmdline = resolved + (" " + parts[1] if len(parts) > 1 else "")
     else:
