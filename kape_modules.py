@@ -1064,7 +1064,13 @@ def main(argv: Optional[List[str]] = None) -> None:
     if not args.dry_run:
         if args.mflush and os.path.isdir(args.mdest):
             logging.info("--mflush: removing destination directory %s", args.mdest)
-            shutil.rmtree(args.mdest)
+            try:
+                shutil.rmtree(args.mdest)
+            except OSError as exc:
+                logging.error(
+                    "--mflush: failed to remove %s: %s", args.mdest, exc
+                )
+                sys.exit(1)
         os.makedirs(args.mdest, exist_ok=True)
 
     mvars = parse_mvars(args.mvars or "")

@@ -3,7 +3,7 @@
 import logging
 import os
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import patch, MagicMock
 
 import pytest
 
@@ -208,3 +208,21 @@ class TestMflushExecution:
         assert not (dest / "subdir").exists()
         # dest itself should be recreated
         assert dest.is_dir()
+
+    def test_mflush_rmtree_failure_exits(
+        self, tmp_dirs, sample_module_dir
+    ):
+        """When shutil.rmtree fails, main should exit with an error."""
+        src, dest = tmp_dirs
+
+        with patch("subprocess.run"), \
+             patch("shutil.rmtree", side_effect=OSError("Permission denied")), \
+             pytest.raises(SystemExit):
+            kape_modules.main(
+                [
+                    "--msource", str(src),
+                    "--mdest", str(dest),
+                    "--module", "TestMod",
+                    "--mpath", str(sample_module_dir),
+                ]
+            )
