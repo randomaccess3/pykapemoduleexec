@@ -1,0 +1,75 @@
+# Platform Executable Mapping
+#
+# Maps Windows executables used in KAPE module (.mkape) files to their
+# equivalents on other platforms.
+#
+# The runner detects the current platform at startup ("windows", "linux",
+# or "darwin") and, for each module processor, looks up the Executable
+# name in this file.  If a mapping exists for the current platform the
+# executable and (optionally) the command line are replaced before
+# execution.
+#
+# Format:
+#   executables:
+#     <windows_executable>:          # case-insensitive match
+#       linux:                       # or "darwin" for macOS
+#         executable: <replacement>
+#         command_line: "<new_args> {original_args}"
+#
+# In the "command_line" value the placeholder {original_args} is replaced
+# with the original CommandLine string from the .mkape module after
+# variable substitution.  If "command_line" is omitted the original
+# arguments are passed unchanged.
+#
+# Examples:
+#
+executables:
+  pecmd.exe:
+    linux:
+      executable: dotnet
+      command_line: "pecmd.dll {original_args}"
+    darwin:
+      executable: dotnet
+      command_line: "pecmd.dll {original_args}"
+  evtxecmd.exe:
+    linux:
+      executable: dotnet
+      command_line: "EvtxECmd.dll {original_args}"
+    darwin:
+      executable: dotnet
+      command_line: "EvtxECmd.dll {original_args}"
+  lecmd.exe:
+    linux:
+      executable: dotnet
+      command_line: "LECmd.dll {original_args}"
+    darwin:
+      executable: dotnet
+      command_line: "LECmd.dll {original_args}"
+  mecmd.exe:
+    linux:
+      executable: dotnet
+      command_line: "MFTECmd.dll {original_args}"
+    darwin:
+      executable: dotnet
+      command_line: "MFTECmd.dll {original_args}"
+  recentfilecacheparser.exe:
+    linux:
+      executable: dotnet
+      command_line: "RecentFileCacheParser.dll {original_args}"
+    darwin:
+      executable: dotnet
+      command_line: "RecentFileCacheParser.dll {original_args}"
+  sbecmd.exe:
+    linux:
+      executable: dotnet
+      command_line: "SBECmd.dll {original_args}"
+    darwin:
+      executable: dotnet
+      command_line: "SBECmd.dll {original_args}"
+  sumecmd.exe:
+    linux:
+      executable: dotnet
+      command_line: "SumECmd.dll {original_args}"
+    darwin:
+      executable: dotnet
+      command_line: "SumECmd.dll {original_args}"

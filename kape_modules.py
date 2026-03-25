@@ -37,7 +37,7 @@ import uuid
 import zipfile
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
-from typing import Dict, List, Optional, Set
+from typing import Dict, List, Optional, Set, Tuple
 
 try:
     import yaml
@@ -47,6 +47,118 @@ except ImportError:  # pragma: no cover
         file=sys.stderr,
     )
     sys.exit(1)
+
+
+# ---------------------------------------------------------------------------
+# Platform detection and executable mapping
+# ---------------------------------------------------------------------------
+
+def _detect_platform() -> str:
+    """Return a normalised platform name: ``windows``, ``linux``, or ``darwin``."""
+    if sys.platform == "win32":
+        return "windows"
+    if sys.platform == "darwin":
+        return "darwin"
+    # Treat all other POSIX-like systems (FreeBSD, OpenBSD, etc.) as linux
+    # since the executable mapping is typically the same.
+    return "linux"
+
+
+CURRENT_PLATFORM: str = _detect_platform()
+
+
+def load_platform_map(map_path: Optional[Path] = None) -> dict:
+    """
+    Load a platform mapping YAML file.
+
+    The file maps Windows executable names to their equivalents on other
+    platforms.  Expected format::
+
+        executables:
+          pecmd.exe:
+            linux:
+              executable: dotnet
+              command_line: "pecmd.dll {original_args}"
+            darwin:
+              executable: dotnet
+              command_line: "pecmd.dll {original_args}"
+
+    Returns an empty dict if *map_path* is ``None`` or the file does not
+    exist.
+    """
+    if map_path is None:
+        return {}
+    if not map_path.is_file():
+        logging.debug("Platform map file not found: %s", map_path)
+        return {}
+    try:
+        with open(map_path, "r", encoding="utf-8") as fh:
+            data = yaml.safe_load(fh) or {}
+        logging.info("Loaded platform map from: %s", map_path)
+        return data
+    except Exception as exc:  # noqa: BLE001
+        logging.warning("Failed to load platform map '%s': %s", map_path, exc)
+        return {}
+
+
+def apply_platform_mapping(
+    executable: str,
+    cmdline: str,
+    platform_map: dict,
+    current_platform: Optional[str] = None,
+) -> Tuple[str, str]:
+    """
+    Replace *executable* and *cmdline* when a platform mapping exists.
+
+    Looks up *executable* (case-insensitive) in the ``executables`` section
+    of *platform_map*.  If the current platform has a mapping entry the
+    executable (and optionally the command line) are replaced.
+
+    In the ``command_line`` value the placeholder ``{original_args}`` is
+    replaced with the original *cmdline* string.
+
+    Returns the (possibly updated) ``(executable, cmdline)`` tuple.
+    """
+    if not platform_map:
+        return executable, cmdline
+
+    if current_platform is None:
+        current_platform = CURRENT_PLATFORM
+
+    # Windows is the native platform – no mapping needed.
+    if current_platform == "windows":
+        return executable, cmdline
+
+    executables_map: dict = platform_map.get("executables") or {}
+
+    # Case-insensitive lookup
+    exe_lower = executable.lower()
+    mapping = None
+    for key, value in executables_map.items():
+        if key.lower() == exe_lower:
+            mapping = value
+            break
+
+    if mapping is None:
+        return executable, cmdline
+
+    platform_entry: dict = mapping.get(current_platform) or {}
+    if not platform_entry:
+        return executable, cmdline
+
+    new_executable: str = platform_entry.get("executable") or executable
+    new_cmdline_template: Optional[str] = platform_entry.get("command_line")
+
+    if new_cmdline_template is not None:
+        new_cmdline = new_cmdline_template.replace("{original_args}", cmdline)
+    else:
+        new_cmdline = cmdline
+
+    logging.info(
+        "Platform mapping applied: %s -> %s (platform=%s)",
+        executable, new_executable, current_platform,
+    )
+    return new_executable, new_cmdline
 
 
 # ---------------------------------------------------------------------------
@@ -332,6 +444,7 @@ def run_module(
     processed_ids: Set[str],
     dry_run: bool = False,
     num_threads: int = 1,
+    platform_map: Optional[dict] = None,
 ) -> None:
     """
     Execute a single module (or expand a compound module).
@@ -344,6 +457,10 @@ def run_module(
     *num_threads* controls how many worker threads are used for concurrent
     execution when a module processes multiple files (FileMask).  Defaults
     to 1 (sequential execution).
+
+    *platform_map*, when provided, is used to replace executables and
+    command lines with platform-specific alternatives (see
+    :func:`apply_platform_mapping`).
     """
     module_id: str = module_data.get("Id") or ""
     if module_id and module_id in processed_ids:
@@ -382,6 +499,7 @@ def run_module(
                             processed_ids,
                             dry_run,
                             num_threads,
+                            platform_map,
                         )
                     except Exception as exc:  # noqa: BLE001
                         logging.error(
@@ -408,6 +526,7 @@ def run_module(
                             processed_ids,
                             dry_run,
                             num_threads,
+                            platform_map,
                         )
                     except Exception as exc:  # noqa: BLE001
                         logging.error(
@@ -462,6 +581,7 @@ def run_module(
 
             cmdline = substitute_variables(cmdline_template, file_vars)
             exe = find_executable(executable_name, modules_dir, module_name)
+            exe, cmdline = apply_platform_mapping(exe, cmdline, platform_map or {})
             execute_command(exe, cmdline, dest_dir, export_file, append, wait_timeout, debug, dry_run)
 
         if num_threads > 1:
@@ -484,6 +604,7 @@ def run_module(
     else:
         cmdline = substitute_variables(cmdline_template, base_vars)
         exe = find_executable(executable_name, modules_dir, module_name)
+        exe, cmdline = apply_platform_mapping(exe, cmdline, platform_map or {})
         execute_command(exe, cmdline, dest_dir, export_file, append, wait_timeout, debug, dry_run)
 
 
@@ -838,6 +959,15 @@ def build_argument_parser() -> argparse.ArgumentParser:
             "(default: %(const)s)."
         ),
     )
+    parser.add_argument(
+        "--platform-map",
+        metavar="PATH",
+        help=(
+            "Path to a platform_map.yaml file that maps Windows executables "
+            "to their equivalents on other platforms.  If not specified, the "
+            "runner looks for 'platform_map.yaml' next to this script."
+        ),
+    )
     return parser
 
 
@@ -908,6 +1038,16 @@ def main(argv: Optional[List[str]] = None) -> None:
     processed_ids: Set[str] = set()
     num_threads: int = max(1, args.mthreads)
 
+    # ------------------------------------------------------------------
+    # Platform detection and executable mapping
+    # ------------------------------------------------------------------
+    logging.info("Detected platform: %s", CURRENT_PLATFORM)
+    if args.platform_map:
+        pmap_path = Path(args.platform_map).resolve()
+    else:
+        pmap_path = script_dir / "platform_map.yaml"
+    platform_map = load_platform_map(pmap_path)
+
     def _run_single_module(module_name: str, module_file: Path) -> None:
         try:
             module_data = load_module(module_file)
@@ -924,6 +1064,7 @@ def main(argv: Optional[List[str]] = None) -> None:
                 processed_ids,
                 args.dry_run,
                 num_threads,
+                platform_map,
             )
         except Exception as exc:  # noqa: BLE001
             logging.error("Error processing module '%s': %s", module_name, exc)
@@ -982,6 +1123,7 @@ def main(argv: Optional[List[str]] = None) -> None:
                     post_processed_ids,
                     args.dry_run,
                     num_threads,
+                    platform_map,
                 )
             except Exception as exc:  # noqa: BLE001
                 logging.error(
