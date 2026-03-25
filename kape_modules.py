@@ -26,7 +26,6 @@ import hashlib
 import io
 import logging
 import os
-import platform
 import re
 import shutil
 import subprocess
@@ -54,9 +53,18 @@ except ImportError:  # pragma: no cover
 # Platform detection and executable mapping
 # ---------------------------------------------------------------------------
 
-CURRENT_PLATFORM: str = "windows" if sys.platform == "win32" else (
-    "darwin" if sys.platform == "darwin" else "linux"
-)
+def _detect_platform() -> str:
+    """Return a normalised platform name: ``windows``, ``linux``, or ``darwin``."""
+    if sys.platform == "win32":
+        return "windows"
+    if sys.platform == "darwin":
+        return "darwin"
+    # Treat all other POSIX-like systems (FreeBSD, OpenBSD, etc.) as linux
+    # since the executable mapping is typically the same.
+    return "linux"
+
+
+CURRENT_PLATFORM: str = _detect_platform()
 
 
 def load_platform_map(map_path: Optional[Path] = None) -> dict:
