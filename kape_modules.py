@@ -50,6 +50,14 @@ except ImportError:  # pragma: no cover
     sys.exit(1)
 
 
+class _HighResFormatter(logging.Formatter):
+    """Logging formatter with microsecond-precision timestamps."""
+
+    def formatTime(self, record, datefmt=None):
+        ct = datetime.datetime.fromtimestamp(record.created)
+        return ct.strftime("%Y-%m-%dT%H:%M:%S.%f")
+
+
 # ---------------------------------------------------------------------------
 # Platform detection and executable mapping
 # ---------------------------------------------------------------------------
@@ -415,23 +423,49 @@ def execute_command(
                 else _unique_export_path(dest_dir, export_file)
             )
             file_mode = "a" if append else "w"
-            with open(export_path, file_mode, encoding="utf-8", errors="replace") as fout:
+            if debug:
                 result = subprocess.run(
                     full_cmd,
                     shell=True,
-                    stdout=fout,
-                    stderr=fout,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
                     timeout=timeout_secs,
                 )
+                stdout_text = result.stdout.decode("utf-8", errors="replace") if result.stdout else ""
+                stderr_text = result.stderr.decode("utf-8", errors="replace") if result.stderr else ""
+                with open(export_path, file_mode, encoding="utf-8", errors="replace") as fout:
+                    fout.write(stdout_text)
+                    if stderr_text:
+                        fout.write(stderr_text)
+                if stdout_text.strip():
+                    logging.debug("    [stdout]\n%s", stdout_text.rstrip())
+                if stderr_text.strip():
+                    logging.debug("    [stderr]\n%s", stderr_text.rstrip())
+            else:
+                with open(export_path, file_mode, encoding="utf-8", errors="replace") as fout:
+                    result = subprocess.run(
+                        full_cmd,
+                        shell=True,
+                        stdout=fout,
+                        stderr=fout,
+                        timeout=timeout_secs,
+                    )
             logging.info("    Output written to: %s", export_path)
         else:
             result = subprocess.run(
                 full_cmd,
                 shell=True,
-                stdout=None if debug else subprocess.PIPE,
-                stderr=None if debug else subprocess.PIPE,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
                 timeout=timeout_secs,
             )
+            if debug:
+                stdout_text = result.stdout.decode("utf-8", errors="replace") if result.stdout else ""
+                stderr_text = result.stderr.decode("utf-8", errors="replace") if result.stderr else ""
+                if stdout_text.strip():
+                    logging.debug("    [stdout]\n%s", stdout_text.rstrip())
+                if stderr_text.strip():
+                    logging.debug("    [stderr]\n%s", stderr_text.rstrip())
 
         if result.returncode != 0:
             logging.warning("    Process exited with code %d", result.returncode)
@@ -992,6 +1026,21 @@ def build_argument_parser() -> argparse.ArgumentParser:
     return parser
 
 
+def _setup_console_log(mdest: str, debug: bool) -> logging.FileHandler:
+    """Add a file handler that writes to ``console.log`` in *mdest*.
+
+    Returns the handler so the caller can remove it when finished.
+    """
+    log_path = os.path.join(mdest, "console.log")
+    handler = logging.FileHandler(log_path, mode="a", encoding="utf-8")
+    handler.setLevel(logging.DEBUG if debug else logging.INFO)
+    handler.setFormatter(
+        _HighResFormatter("%(asctime)s [%(levelname)s] %(message)s")
+    )
+    logging.getLogger().addHandler(handler)
+    return handler
+
+
 def main(argv: Optional[List[str]] = None) -> None:
     parser = build_argument_parser()
     args = parser.parse_args(argv)
@@ -1001,6 +1050,9 @@ def main(argv: Optional[List[str]] = None) -> None:
         format="%(asctime)s [%(levelname)s] %(message)s",
         datefmt="%Y-%m-%d %H:%M:%S",
     )
+    # Ensure root logger level is set even when basicConfig is a no-op
+    # (e.g. when handlers were already configured by a test harness).
+    logging.getLogger().setLevel(logging.DEBUG if args.debug else logging.INFO)
 
     script_dir = Path(__file__).parent.resolve()
     modules_dir = get_modules_dir(script_dir, args.mpath)
@@ -1054,81 +1106,29 @@ def main(argv: Optional[List[str]] = None) -> None:
     if not args.dry_run:
         os.makedirs(args.mdest, exist_ok=True)
 
-    mvars = parse_mvars(args.mvars or "")
-    module_names = [n.strip() for n in args.module.split(",") if n.strip()]
-    processed_ids: Set[str] = set()
-    num_threads: int = max(1, args.mthreads)
+    # Set up console.log file handler in mdest
+    file_handler = (
+        _setup_console_log(args.mdest, args.debug)
+        if not args.dry_run
+        else None
+    )
+    try:
+        mvars = parse_mvars(args.mvars or "")
+        module_names = [n.strip() for n in args.module.split(",") if n.strip()]
+        processed_ids: Set[str] = set()
+        num_threads: int = max(1, args.mthreads)
 
-    # ------------------------------------------------------------------
-    # Platform detection and executable mapping
-    # ------------------------------------------------------------------
-    logging.info("Detected platform: %s", CURRENT_PLATFORM)
-    if args.platform_map:
-        pmap_path = Path(args.platform_map).resolve()
-    else:
-        pmap_path = script_dir / "platform_map.yaml"
-    platform_map = load_platform_map(pmap_path)
+        # ------------------------------------------------------------------
+        # Platform detection and executable mapping
+        # ------------------------------------------------------------------
+        logging.info("Detected platform: %s", CURRENT_PLATFORM)
+        if args.platform_map:
+            pmap_path = Path(args.platform_map).resolve()
+        else:
+            pmap_path = script_dir / "platform_map.yaml"
+        platform_map = load_platform_map(pmap_path)
 
-    def _run_single_module(module_name: str, module_file: Path) -> None:
-        try:
-            module_data = load_module(module_file)
-            run_module(
-                module_name,
-                module_data,
-                module_file,
-                modules_dir,
-                args.msource,
-                args.mdest,
-                args.mef,
-                mvars,
-                args.debug,
-                processed_ids,
-                args.dry_run,
-                num_threads,
-                platform_map,
-            )
-        except Exception as exc:  # noqa: BLE001
-            logging.error("Error processing module '%s': %s", module_name, exc)
-            if args.debug:
-                traceback.print_exc()
-
-    # Collect (module_name, module_file) pairs to execute
-    tasks: List[tuple] = []
-    for module_name in module_names:
-        module_files = find_module_files(modules_dir, module_name)
-        if not module_files:
-            logging.warning("Module '%s' not found in %s", module_name, modules_dir)
-            continue
-        for module_file in module_files:
-            tasks.append((module_name, module_file))
-
-    if num_threads > 1 and len(tasks) > 1:
-        with ThreadPoolExecutor(max_workers=num_threads) as executor:
-            futures = {
-                executor.submit(_run_single_module, name, mfile): name
-                for name, mfile in tasks
-            }
-            for future in as_completed(futures):
-                try:
-                    future.result()
-                except Exception as exc:  # noqa: BLE001
-                    logging.error(
-                        "Error processing module '%s': %s", futures[future], exc
-                    )
-    else:
-        for module_name, module_file in tasks:
-            _run_single_module(module_name, module_file)
-
-    # ------------------------------------------------------------------
-    # --post-process: run modules after all --module tasks have finished.
-    # The source directory for post-process modules is --mdest.
-    # ------------------------------------------------------------------
-    if args.post_process:
-        logging.info("Starting post-process modules.")
-        post_names = [n.strip() for n in args.post_process.split(",") if n.strip()]
-        post_processed_ids: Set[str] = set()
-
-        def _run_post_module(module_name: str, module_file: Path) -> None:
+        def _run_single_module(module_name: str, module_file: Path) -> None:
             try:
                 module_data = load_module(module_file)
                 run_module(
@@ -1136,55 +1136,118 @@ def main(argv: Optional[List[str]] = None) -> None:
                     module_data,
                     module_file,
                     modules_dir,
-                    args.mdest,
+                    args.msource,
                     args.mdest,
                     args.mef,
                     mvars,
                     args.debug,
-                    post_processed_ids,
+                    processed_ids,
                     args.dry_run,
                     num_threads,
                     platform_map,
                 )
             except Exception as exc:  # noqa: BLE001
-                logging.error(
-                    "Error processing post-process module '%s': %s",
-                    module_name, exc,
-                )
+                logging.error("Error processing module '%s': %s", module_name, exc)
                 if args.debug:
                     traceback.print_exc()
 
-        post_tasks: List[tuple] = []
-        for post_name in post_names:
-            post_files = find_module_files(modules_dir, post_name)
-            if not post_files:
-                logging.warning(
-                    "Post-process module '%s' not found in %s",
-                    post_name, modules_dir,
-                )
+        # Collect (module_name, module_file) pairs to execute
+        tasks: List[tuple] = []
+        for module_name in module_names:
+            module_files = find_module_files(modules_dir, module_name)
+            if not module_files:
+                logging.warning("Module '%s' not found in %s", module_name, modules_dir)
                 continue
-            for post_file in post_files:
-                post_tasks.append((post_name, post_file))
+            for module_file in module_files:
+                tasks.append((module_name, module_file))
 
-        if num_threads > 1 and len(post_tasks) > 1:
+        if num_threads > 1 and len(tasks) > 1:
             with ThreadPoolExecutor(max_workers=num_threads) as executor:
                 futures = {
-                    executor.submit(_run_post_module, name, mfile): name
-                    for name, mfile in post_tasks
+                    executor.submit(_run_single_module, name, mfile): name
+                    for name, mfile in tasks
                 }
                 for future in as_completed(futures):
                     try:
                         future.result()
                     except Exception as exc:  # noqa: BLE001
                         logging.error(
-                            "Error processing post-process module '%s': %s",
-                            futures[future], exc,
+                            "Error processing module '%s': %s", futures[future], exc
                         )
         else:
-            for post_name, post_file in post_tasks:
-                _run_post_module(post_name, post_file)
+            for module_name, module_file in tasks:
+                _run_single_module(module_name, module_file)
 
-    logging.info("Done.")
+        # ------------------------------------------------------------------
+        # --post-process: run modules after all --module tasks have finished.
+        # The source directory for post-process modules is --mdest.
+        # ------------------------------------------------------------------
+        if args.post_process:
+            logging.info("Starting post-process modules.")
+            post_names = [n.strip() for n in args.post_process.split(",") if n.strip()]
+            post_processed_ids: Set[str] = set()
+
+            def _run_post_module(module_name: str, module_file: Path) -> None:
+                try:
+                    module_data = load_module(module_file)
+                    run_module(
+                        module_name,
+                        module_data,
+                        module_file,
+                        modules_dir,
+                        args.mdest,
+                        args.mdest,
+                        args.mef,
+                        mvars,
+                        args.debug,
+                        post_processed_ids,
+                        args.dry_run,
+                        num_threads,
+                        platform_map,
+                    )
+                except Exception as exc:  # noqa: BLE001
+                    logging.error(
+                        "Error processing post-process module '%s': %s",
+                        module_name, exc,
+                    )
+                    if args.debug:
+                        traceback.print_exc()
+
+            post_tasks: List[tuple] = []
+            for post_name in post_names:
+                post_files = find_module_files(modules_dir, post_name)
+                if not post_files:
+                    logging.warning(
+                        "Post-process module '%s' not found in %s",
+                        post_name, modules_dir,
+                    )
+                    continue
+                for post_file in post_files:
+                    post_tasks.append((post_name, post_file))
+
+            if num_threads > 1 and len(post_tasks) > 1:
+                with ThreadPoolExecutor(max_workers=num_threads) as executor:
+                    futures = {
+                        executor.submit(_run_post_module, name, mfile): name
+                        for name, mfile in post_tasks
+                    }
+                    for future in as_completed(futures):
+                        try:
+                            future.result()
+                        except Exception as exc:  # noqa: BLE001
+                            logging.error(
+                                "Error processing post-process module '%s': %s",
+                                futures[future], exc,
+                            )
+            else:
+                for post_name, post_file in post_tasks:
+                    _run_post_module(post_name, post_file)
+
+        logging.info("Done.")
+    finally:
+        if file_handler:
+            logging.getLogger().removeHandler(file_handler)
+            file_handler.close()
 
 
 if __name__ == "__main__":
