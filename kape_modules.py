@@ -131,8 +131,10 @@ def apply_platform_mapping(
 
     executables_map: dict = platform_map.get("executables") or {}
 
-    # Case-insensitive lookup
-    exe_lower = executable.lower()
+    # Case-insensitive lookup using basename so that full paths returned by
+    # find_executable() (e.g. "/path/to/Modules/bin/LECmd.exe") still match
+    # YAML keys that contain only the filename (e.g. "lecmd.exe").
+    exe_lower = os.path.basename(executable).lower()
     mapping = None
     for key, value in executables_map.items():
         if key.lower() == exe_lower:
@@ -151,6 +153,16 @@ def apply_platform_mapping(
 
     if new_cmdline_template is not None:
         new_cmdline = new_cmdline_template.replace("{original_args}", cmdline)
+        # When the original executable was resolved to a full path (e.g.
+        # by find_executable()), resolve relative file references in the
+        # command line against the original executable's directory so that
+        # e.g. "LECmd.dll" becomes "/path/to/Modules/bin/LECmd.dll".
+        exe_dir = os.path.dirname(executable)
+        if exe_dir:
+            parts = new_cmdline.split(None, 1)
+            if parts and not os.path.isabs(parts[0]) and "." in os.path.basename(parts[0]):
+                resolved = os.path.join(exe_dir, parts[0])
+                new_cmdline = resolved + (" " + parts[1] if len(parts) > 1 else "")
     else:
         new_cmdline = cmdline
 

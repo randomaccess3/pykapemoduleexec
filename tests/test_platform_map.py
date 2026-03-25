@@ -107,6 +107,34 @@ def sample_module_dir(tmp_path):
     return modules
 
 
+@pytest.fixture
+def sample_module_dir_with_bin(tmp_path):
+    """Create a Modules directory with executable in bin/ so find_executable
+    returns a full path — the scenario that triggered the original bug."""
+    modules = tmp_path / "Modules"
+    sample = modules / "Sample"
+    sample.mkdir(parents=True)
+    bin_dir = modules / "bin"
+    bin_dir.mkdir(parents=True)
+    # Create a dummy executable so find_executable resolves to its full path
+    (bin_dir / "pecmd.exe").write_text("")
+    mkape = sample / "PECmd.mkape"
+    mkape.write_text(
+        "Description: Prefetch module\n"
+        "Category: FileSystem\n"
+        "Author: test\n"
+        "Version: 1\n"
+        "Id: 00000000-0000-0000-0000-000000000098\n"
+        "ExportFormat: csv\n"
+        "Processors:\n"
+        "  - Executable: pecmd.exe\n"
+        '    CommandLine: "-d %sourceDirectory% --csv %destinationDirectory%"\n'
+        "    ExportFormat: csv\n"
+        "    ExportFile: prefetch.csv\n"
+    )
+    return modules
+
+
 # ---------------------------------------------------------------------------
 # Tests: load_platform_map
 # ---------------------------------------------------------------------------
@@ -218,6 +246,43 @@ class TestApplyPlatformMapping:
             current_platform="linux",
         )
         assert cmd == "pecmd.dll -d /evidence --csv /out"
+
+    def test_full_path_executable_matches_basename(self, platform_map_data):
+        """A full path executable should still match YAML keys by basename."""
+        exe, cmd = kape_modules.apply_platform_mapping(
+            "/path/to/Modules/bin/pecmd.exe", "-d /src --csv /dst",
+            platform_map_data, current_platform="darwin",
+        )
+        assert exe == "dotnet"
+        assert "pecmd.dll" in cmd
+
+    def test_full_path_resolves_dll_against_exe_dir(self, platform_map_data):
+        """When executable is a full path, the DLL in command_line should be
+        resolved relative to the executable's directory."""
+        exe, cmd = kape_modules.apply_platform_mapping(
+            "/path/to/Modules/bin/pecmd.exe", "-d /src --csv /dst",
+            platform_map_data, current_platform="linux",
+        )
+        assert exe == "dotnet"
+        assert cmd == "/path/to/Modules/bin/pecmd.dll -d /src --csv /dst"
+
+    def test_bare_name_keeps_relative_dll(self, platform_map_data):
+        """When executable has no directory component, DLL stays relative."""
+        exe, cmd = kape_modules.apply_platform_mapping(
+            "pecmd.exe", "-d /src", platform_map_data, current_platform="linux",
+        )
+        assert exe == "dotnet"
+        assert cmd == "pecmd.dll -d /src"
+
+    def test_no_command_line_full_path_preserves_args(self, platform_map_data):
+        """When command_line is absent, original args are kept even with a full
+        path executable."""
+        exe, cmd = kape_modules.apply_platform_mapping(
+            "/usr/local/bin/noargs.exe", "--flag value", platform_map_data,
+            current_platform="linux",
+        )
+        assert exe == "noargs-linux"
+        assert cmd == "--flag value"
 
 
 # ---------------------------------------------------------------------------
@@ -360,9 +425,42 @@ class TestRunModuleWithPlatformMapping:
         cmd_str = mock_run.call_args[0][0]
         assert "pecmd.exe" in cmd_str
 
+    @patch("kape_modules.CURRENT_PLATFORM", "darwin")
+    @patch("subprocess.run")
+    def test_mapping_applied_with_full_path_exe(
+        self, mock_run, tmp_dirs, sample_module_dir_with_bin, platform_map_data,
+    ):
+        """When find_executable returns a full path (exe in bin/), the mapping
+        should still match by basename and resolve the DLL path."""
+        src, dest = tmp_dirs
+        modules = sample_module_dir_with_bin
 
-# ---------------------------------------------------------------------------
-# Tests: integration — main() with --platform-map
+        module_file = modules / "Sample" / "PECmd.mkape"
+        module_data = kape_modules.load_module(module_file)
+
+        kape_modules.run_module(
+            "PECmd",
+            module_data,
+            module_file,
+            modules,
+            str(src),
+            str(dest),
+            None,
+            {},
+            False,
+            set(),
+            dry_run=False,
+            num_threads=1,
+            platform_map=platform_map_data,
+        )
+
+        assert mock_run.called
+        cmd_str = mock_run.call_args[0][0]
+        assert "dotnet" in cmd_str
+        assert "pecmd.exe" not in cmd_str
+        # The DLL should be resolved to the full path in the bin directory
+        expected_dll = str(modules / "bin" / "pecmd.dll")
+        assert expected_dll in cmd_str
 # ---------------------------------------------------------------------------
 
 
