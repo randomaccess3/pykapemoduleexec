@@ -521,3 +521,61 @@ class TestMainPlatformMap:
         cmd_str = mock_run.call_args[0][0]
         # Should use original executable since map file doesn't exist
         assert "pecmd.exe" in cmd_str
+
+
+# ---------------------------------------------------------------------------
+# Tests: shipped platform_map.yaml contains forensic tool entries
+# ---------------------------------------------------------------------------
+
+
+class TestShippedPlatformMapForensicTools:
+    """Verify that the shipped platform_map.yaml contains the expected
+    forensic tool entries from ericzimmerman.github.io."""
+
+    @pytest.fixture(autouse=True)
+    def _load_shipped_map(self):
+        shipped = Path(__file__).resolve().parent.parent / "platform_map.yaml"
+        self.pmap = kape_modules.load_platform_map(shipped)
+
+    FORENSIC_TOOLS = [
+        ("ezviewer.exe", "EZViewer.dll"),
+        ("hasher.exe", "Hasher.dll"),
+        ("jumplistexplorer.exe", "JumpListExplorer.dll"),
+        ("mftexplorer.exe", "MFTExplorer.dll"),
+        ("registryexplorer.exe", "RegistryExplorer.dll"),
+        ("sdbexplorer.exe", "SDBExplorer.dll"),
+        ("shellbagsexplorer.exe", "ShellBagsExplorer.dll"),
+        ("timelineexplorer.exe", "TimelineExplorer.dll"),
+    ]
+
+    @pytest.mark.parametrize("exe_key, dll_name", FORENSIC_TOOLS)
+    def test_forensic_tool_present(self, exe_key, dll_name):
+        """Each forensic tool should have an entry in the executables map."""
+        executables = self.pmap.get("executables", {})
+        assert exe_key in executables, f"{exe_key} missing from platform map"
+
+    @pytest.mark.parametrize("exe_key, dll_name", FORENSIC_TOOLS)
+    def test_forensic_tool_linux_mapping(self, exe_key, dll_name):
+        """Each forensic tool should map to dotnet on linux."""
+        entry = self.pmap["executables"][exe_key]
+        linux = entry.get("linux", {})
+        assert linux.get("executable") == "dotnet"
+        assert dll_name in linux.get("command_line", "")
+
+    @pytest.mark.parametrize("exe_key, dll_name", FORENSIC_TOOLS)
+    def test_forensic_tool_darwin_mapping(self, exe_key, dll_name):
+        """Each forensic tool should map to dotnet on darwin."""
+        entry = self.pmap["executables"][exe_key]
+        darwin = entry.get("darwin", {})
+        assert darwin.get("executable") == "dotnet"
+        assert dll_name in darwin.get("command_line", "")
+
+    @pytest.mark.parametrize("exe_key, dll_name", FORENSIC_TOOLS)
+    def test_forensic_tool_apply_mapping_linux(self, exe_key, dll_name):
+        """apply_platform_mapping should work for each forensic tool on linux."""
+        exe, cmd = kape_modules.apply_platform_mapping(
+            exe_key, "--some-arg /path", self.pmap, current_platform="linux",
+        )
+        assert exe == "dotnet"
+        assert dll_name in cmd
+        assert "--some-arg /path" in cmd

@@ -73,3 +73,59 @@ executables:
     darwin:
       executable: dotnet
       command_line: "SumECmd.dll {original_args}"
+  ezviewer.exe:
+    linux:
+      executable: dotnet
+      command_line: "EZViewer.dll {original_args}"
+    darwin:
+      executable: dotnet
+      command_line: "EZViewer.dll {original_args}"
+  hasher.exe:
+    linux:
+      executable: dotnet
+      command_line: "Hasher.dll {original_args}"
+    darwin:
+      executable: dotnet
+      command_line: "Hasher.dll {original_args}"
+  jumplistexplorer.exe:
+    linux:
+      executable: dotnet
+      command_line: "JumpListExplorer.dll {original_args}"
+    darwin:
+      executable: dotnet
+      command_line: "JumpListExplorer.dll {original_args}"
+  mftexplorer.exe:
+    linux:
+      executable: dotnet
+      command_line: "MFTExplorer.dll {original_args}"
+    darwin:
+      executable: dotnet
+      command_line: "MFTExplorer.dll {original_args}"
+  registryexplorer.exe:
+    linux:
+      executable: dotnet
+      command_line: "RegistryExplorer.dll {original_args}"
+    darwin:
+      executable: dotnet
+      command_line: "RegistryExplorer.dll {original_args}"
+  sdbexplorer.exe:
+    linux:
+      executable: dotnet
+      command_line: "SDBExplorer.dll {original_args}"
+    darwin:
+      executable: dotnet
+      command_line: "SDBExplorer.dll {original_args}"
+  shellbagsexplorer.exe:
+    linux:
+      executable: dotnet
+      command_line: "ShellBagsExplorer.dll {original_args}"
+    darwin:
+      executable: dotnet
+      command_line: "ShellBagsExplorer.dll {original_args}"
+  timelineexplorer.exe:
+    linux:
+      executable: dotnet
+      command_line: "TimelineExplorer.dll {original_args}"
+    darwin:
+      executable: dotnet
+      command_line: "TimelineExplorer.dll {original_args}"
