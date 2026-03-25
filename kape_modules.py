@@ -27,6 +27,7 @@ import io
 import logging
 import os
 import re
+import shlex
 import shutil
 import subprocess
 import sys
@@ -163,7 +164,7 @@ def apply_platform_mapping(
             if (parts and not os.path.isabs(parts[0])
                     and not parts[0].startswith("-")
                     and "." in os.path.basename(parts[0])):
-                resolved = os.path.join(exe_dir, parts[0])
+                resolved = shlex.quote(os.path.join(exe_dir, parts[0]))
                 new_cmdline = resolved + (" " + parts[1] if len(parts) > 1 else "")
     else:
         new_cmdline = cmdline

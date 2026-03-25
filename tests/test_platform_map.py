@@ -266,6 +266,18 @@ class TestApplyPlatformMapping:
         assert exe == "dotnet"
         assert cmd == "/path/to/Modules/bin/pecmd.dll -d /src --csv /dst"
 
+    def test_full_path_with_spaces_quotes_dll(self, platform_map_data):
+        """When the exe directory contains spaces, the resolved DLL path must
+        be shell-quoted so it survives shell=True in subprocess.run."""
+        exe, cmd = kape_modules.apply_platform_mapping(
+            "/Users/John Smith/Modules/bin/pecmd.exe", "-d /src --csv /dst",
+            platform_map_data, current_platform="darwin",
+        )
+        assert exe == "dotnet"
+        # The DLL path should be quoted because it contains spaces
+        assert "'/Users/John Smith/Modules/bin/pecmd.dll'" in cmd
+        assert cmd.endswith("-d /src --csv /dst")
+
     def test_bare_name_keeps_relative_dll(self, platform_map_data):
         """When executable has no directory component, DLL stays relative."""
         exe, cmd = kape_modules.apply_platform_mapping(
