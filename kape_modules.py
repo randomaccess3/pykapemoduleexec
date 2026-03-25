@@ -300,7 +300,8 @@ def find_executable(executable: str, modules_dir: Path, module_name: str) -> str
 
     1. ``<modules_dir>/<module_name>/<executable>``
     2. ``<modules_dir>/bin/<executable>``
-    3. The name as-is (rely on the system PATH / absolute path).
+    3. ``<modules_dir>/bin/<stem>/<executable>``  (subfolder named after the binary)
+    4. The name as-is (rely on the system PATH / absolute path).
     """
     named_dir = modules_dir / module_name / executable
     if named_dir.exists():
@@ -309,6 +310,10 @@ def find_executable(executable: str, modules_dir: Path, module_name: str) -> str
     bin_dir = modules_dir / "bin" / executable
     if bin_dir.exists():
         return str(bin_dir)
+
+    bin_subdir = modules_dir / "bin" / Path(executable).stem / executable
+    if bin_subdir.exists():
+        return str(bin_subdir)
 
     return executable
 
@@ -657,8 +662,9 @@ def list_modules(modules_dir: Path, detail: bool = False) -> None:
                 exe = proc.get("Executable", "")
                 named_ok = (modules_dir / mkape.stem / exe).exists()
                 bin_ok = (modules_dir / "bin" / exe).exists()
+                bin_sub_ok = (modules_dir / "bin" / Path(exe).stem / exe).exists()
                 abs_ok = Path(exe).is_absolute() and Path(exe).exists()
-                status = "OK" if (named_ok or bin_ok or abs_ok) else "MISSING"
+                status = "OK" if (named_ok or bin_ok or bin_sub_ok or abs_ok) else "MISSING"
                 print(f"Processor {idx} : {exe} [{status}]")
                 print(f"  CommandLine : {proc.get('CommandLine', '')}")
                 print(f"  ExportFormat: {proc.get('ExportFormat', '')}")
