@@ -1036,19 +1036,29 @@ def build_argument_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def _setup_console_log(mdest: str, debug: bool) -> logging.FileHandler:
-    """Add a file handler that writes to ``console.log`` in *mdest*.
+def _setup_console_log(
+    mdest: str, debug: bool
+) -> Tuple[logging.FileHandler, str]:
+    """Add a file handler that writes a timestamped console log in *mdest*.
 
-    Returns the handler so the caller can remove it when finished.
+    The log filename includes the execution time in the format
+    ``yyyy-MM-ddTHH_mm_ss_fffffff_console.log``, for example
+    ``2018-09-03T14_51_21_7565737_console.log``.
+
+    Returns ``(handler, log_path)`` so the caller can track the filename
+    and remove the handler when finished.
     """
-    log_path = os.path.join(mdest, "console.log")
+    now = datetime.datetime.now()
+    # Build 7-digit fractional seconds (Python %f gives 6-digit microseconds)
+    timestamp = now.strftime("%Y-%m-%dT%H_%M_%S_%f") + "0"
+    log_path = os.path.join(mdest, f"{timestamp}_console.log")
     handler = logging.FileHandler(log_path, mode="a", encoding="utf-8")
     handler.setLevel(logging.DEBUG if debug else logging.INFO)
     handler.setFormatter(
         _HighResFormatter("%(asctime)s [%(levelname)s] %(message)s")
     )
     logging.getLogger().addHandler(handler)
-    return handler
+    return handler, log_path
 
 
 def main(argv: Optional[List[str]] = None) -> None:
@@ -1126,10 +1136,10 @@ def main(argv: Optional[List[str]] = None) -> None:
         os.makedirs(args.mdest, exist_ok=True)
 
     # Set up console.log file handler in mdest
-    file_handler = (
+    file_handler, _console_log_path = (
         _setup_console_log(args.mdest, args.debug)
         if not args.dry_run
-        else None
+        else (None, None)
     )
     try:
         mvars = parse_mvars(args.mvars or "")

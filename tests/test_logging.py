@@ -52,6 +52,25 @@ def sample_module_dir(tmp_path):
     return modules
 
 
+@pytest.fixture
+def capture_console_log():
+    """Wrap ``_setup_console_log`` to capture the log path it generates.
+
+    Returns a dict that will contain ``"log_path"`` after ``main()`` runs.
+    The fixture automatically patches ``_setup_console_log`` for the test.
+    """
+    captured = {}
+    original = kape_modules._setup_console_log
+
+    def _wrap(mdest, debug):
+        handler, log_path = original(mdest, debug)
+        captured["log_path"] = log_path
+        return handler, log_path
+
+    with patch("kape_modules._setup_console_log", side_effect=_wrap):
+        yield captured
+
+
 # ---------------------------------------------------------------------------
 # _HighResFormatter tests
 # ---------------------------------------------------------------------------
@@ -95,16 +114,30 @@ class TestSetupConsoleLog:
         root = logging.getLogger()
         old_level = root.level
         root.setLevel(logging.INFO)
-        handler = kape_modules._setup_console_log(dest, debug=False)
+        handler, log_path = kape_modules._setup_console_log(dest, debug=False)
         try:
             logging.info("console log test message")
             handler.flush()
-            log_path = os.path.join(dest, "console.log")
             assert os.path.exists(log_path)
             content = open(log_path).read()
             assert "console log test message" in content
         finally:
             root.setLevel(old_level)
+            logging.getLogger().removeHandler(handler)
+            handler.close()
+
+    def test_console_log_filename_format(self, tmp_path):
+        dest = str(tmp_path / "output")
+        os.makedirs(dest, exist_ok=True)
+        handler, log_path = kape_modules._setup_console_log(dest, debug=False)
+        try:
+            filename = os.path.basename(log_path)
+            # Expect format: yyyy-MM-ddTHH_mm_ss_fffffff_console.log
+            assert re.match(
+                r"\d{4}-\d{2}-\d{2}T\d{2}_\d{2}_\d{2}_\d{7}_console\.log$",
+                filename,
+            )
+        finally:
             logging.getLogger().removeHandler(handler)
             handler.close()
 
@@ -114,11 +147,11 @@ class TestSetupConsoleLog:
         root = logging.getLogger()
         old_level = root.level
         root.setLevel(logging.INFO)
-        handler = kape_modules._setup_console_log(dest, debug=False)
+        handler, log_path = kape_modules._setup_console_log(dest, debug=False)
         try:
             logging.info("timestamp test")
             handler.flush()
-            content = open(os.path.join(dest, "console.log")).read()
+            content = open(log_path).read()
             # Microsecond-precision timestamp
             assert re.search(
                 r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{6}", content
@@ -134,11 +167,11 @@ class TestSetupConsoleLog:
         root = logging.getLogger()
         old_level = root.level
         root.setLevel(logging.DEBUG)
-        handler = kape_modules._setup_console_log(dest, debug=True)
+        handler, log_path = kape_modules._setup_console_log(dest, debug=True)
         try:
             logging.debug("debug visible")
             handler.flush()
-            content = open(os.path.join(dest, "console.log")).read()
+            content = open(log_path).read()
             assert "debug visible" in content
         finally:
             root.setLevel(old_level)
@@ -151,12 +184,12 @@ class TestSetupConsoleLog:
         root = logging.getLogger()
         old_level = root.level
         root.setLevel(logging.DEBUG)
-        handler = kape_modules._setup_console_log(dest, debug=False)
+        handler, log_path = kape_modules._setup_console_log(dest, debug=False)
         try:
             logging.debug("debug hidden")
             logging.info("info visible")
             handler.flush()
-            content = open(os.path.join(dest, "console.log")).read()
+            content = open(log_path).read()
             assert "debug hidden" not in content
             assert "info visible" in content
         finally:
@@ -171,9 +204,11 @@ class TestSetupConsoleLog:
 
 
 class TestMainConsoleLog:
-    """main() creates console.log in mdest during module execution."""
+    """main() creates a timestamped console log in mdest during module execution."""
 
-    def test_console_log_created_in_mdest(self, tmp_dirs, sample_module_dir):
+    def test_console_log_created_in_mdest(
+        self, tmp_dirs, sample_module_dir, capture_console_log
+    ):
         src, dest = tmp_dirs
         with patch("kape_modules.subprocess.run") as mock_run:
             mock_run.return_value = type(
@@ -185,13 +220,15 @@ class TestMainConsoleLog:
                 "--module", "LogMod",
                 "--mpath", str(sample_module_dir),
             ])
-        log_path = dest / "console.log"
-        assert log_path.exists()
-        content = log_path.read_text()
+        log_path = capture_console_log["log_path"]
+        assert os.path.exists(log_path)
+        content = open(log_path).read()
         assert "Processing module: LogMod" in content
         assert "Done." in content
 
-    def test_console_log_has_high_res_timestamps(self, tmp_dirs, sample_module_dir):
+    def test_console_log_has_high_res_timestamps(
+        self, tmp_dirs, sample_module_dir, capture_console_log
+    ):
         src, dest = tmp_dirs
         with patch("kape_modules.subprocess.run") as mock_run:
             mock_run.return_value = type(
@@ -203,7 +240,7 @@ class TestMainConsoleLog:
                 "--module", "LogMod",
                 "--mpath", str(sample_module_dir),
             ])
-        content = (dest / "console.log").read_text()
+        content = open(capture_console_log["log_path"]).read()
         assert re.search(
             r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{6}", content
         )
@@ -354,7 +391,7 @@ class TestDebugProcessOutput:
         assert "csv,data" in open(export_path).read()
 
     def test_debug_main_includes_process_output_in_console_log(
-        self, tmp_dirs, sample_module_dir
+        self, tmp_dirs, sample_module_dir, capture_console_log
     ):
         """With --debug, process stdout/stderr appear in console.log."""
         src, dest = tmp_dirs
@@ -370,5 +407,5 @@ class TestDebugProcessOutput:
                 "--mpath", str(sample_module_dir),
                 "--debug",
             ])
-        content = (dest / "console.log").read_text()
+        content = open(capture_console_log["log_path"]).read()
         assert "module output here" in content
