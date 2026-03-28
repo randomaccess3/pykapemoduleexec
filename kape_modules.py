@@ -1037,11 +1037,18 @@ def build_argument_parser() -> argparse.ArgumentParser:
 
 
 def _setup_console_log(mdest: str, debug: bool) -> logging.FileHandler:
-    """Add a file handler that writes to ``console.log`` in *mdest*.
+    """Add a file handler that writes a timestamped console log in *mdest*.
+
+    The log filename includes the execution time in the format
+    ``yyyy-MM-ddTHH_mm_ss_fffffff_console.log``, for example
+    ``2018-09-03T14_51_21_7565737_console.log``.
 
     Returns the handler so the caller can remove it when finished.
     """
-    log_path = os.path.join(mdest, "console.log")
+    now = datetime.datetime.now()
+    # Build 7-digit fractional seconds (Python %f gives 6-digit microseconds)
+    timestamp = now.strftime("%Y-%m-%dT%H_%M_%S_%f") + "0"
+    log_path = os.path.join(mdest, f"{timestamp}_console.log")
     handler = logging.FileHandler(log_path, mode="a", encoding="utf-8")
     handler.setLevel(logging.DEBUG if debug else logging.INFO)
     handler.setFormatter(

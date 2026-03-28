@@ -1,5 +1,6 @@
 """Tests for console.log file logging and debug process output capture."""
 
+import glob
 import logging
 import os
 import re
@@ -13,6 +14,14 @@ import sys
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 import kape_modules
+
+
+def _find_console_log(directory):
+    """Return the path to the single ``*_console.log`` file in *directory*."""
+    pattern = os.path.join(str(directory), "*_console.log")
+    matches = glob.glob(pattern)
+    assert len(matches) == 1, f"Expected 1 console log, found {len(matches)}: {matches}"
+    return matches[0]
 
 
 # ---------------------------------------------------------------------------
@@ -99,12 +108,28 @@ class TestSetupConsoleLog:
         try:
             logging.info("console log test message")
             handler.flush()
-            log_path = os.path.join(dest, "console.log")
+            log_path = _find_console_log(dest)
             assert os.path.exists(log_path)
             content = open(log_path).read()
             assert "console log test message" in content
         finally:
             root.setLevel(old_level)
+            logging.getLogger().removeHandler(handler)
+            handler.close()
+
+    def test_console_log_filename_format(self, tmp_path):
+        dest = str(tmp_path / "output")
+        os.makedirs(dest, exist_ok=True)
+        handler = kape_modules._setup_console_log(dest, debug=False)
+        try:
+            log_path = _find_console_log(dest)
+            filename = os.path.basename(log_path)
+            # Expect format: yyyy-MM-ddTHH_mm_ss_fffffff_console.log
+            assert re.match(
+                r"\d{4}-\d{2}-\d{2}T\d{2}_\d{2}_\d{2}_\d{7}_console\.log$",
+                filename,
+            )
+        finally:
             logging.getLogger().removeHandler(handler)
             handler.close()
 
@@ -118,7 +143,7 @@ class TestSetupConsoleLog:
         try:
             logging.info("timestamp test")
             handler.flush()
-            content = open(os.path.join(dest, "console.log")).read()
+            content = open(_find_console_log(dest)).read()
             # Microsecond-precision timestamp
             assert re.search(
                 r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{6}", content
@@ -138,7 +163,7 @@ class TestSetupConsoleLog:
         try:
             logging.debug("debug visible")
             handler.flush()
-            content = open(os.path.join(dest, "console.log")).read()
+            content = open(_find_console_log(dest)).read()
             assert "debug visible" in content
         finally:
             root.setLevel(old_level)
@@ -156,7 +181,7 @@ class TestSetupConsoleLog:
             logging.debug("debug hidden")
             logging.info("info visible")
             handler.flush()
-            content = open(os.path.join(dest, "console.log")).read()
+            content = open(_find_console_log(dest)).read()
             assert "debug hidden" not in content
             assert "info visible" in content
         finally:
@@ -185,9 +210,8 @@ class TestMainConsoleLog:
                 "--module", "LogMod",
                 "--mpath", str(sample_module_dir),
             ])
-        log_path = dest / "console.log"
-        assert log_path.exists()
-        content = log_path.read_text()
+        log_path = _find_console_log(dest)
+        content = open(log_path).read()
         assert "Processing module: LogMod" in content
         assert "Done." in content
 
@@ -203,7 +227,7 @@ class TestMainConsoleLog:
                 "--module", "LogMod",
                 "--mpath", str(sample_module_dir),
             ])
-        content = (dest / "console.log").read_text()
+        content = open(_find_console_log(dest)).read()
         assert re.search(
             r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{6}", content
         )
@@ -370,5 +394,5 @@ class TestDebugProcessOutput:
                 "--mpath", str(sample_module_dir),
                 "--debug",
             ])
-        content = (dest / "console.log").read_text()
+        content = open(_find_console_log(dest)).read()
         assert "module output here" in content
