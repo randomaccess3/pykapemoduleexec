@@ -628,6 +628,58 @@ def run_module(
         return
 
     # ------------------------------------------------------------------
+    # Check for compound processors: processors that reference .mkape files
+    # ------------------------------------------------------------------
+    processors = [p for p in (module_data.get("Processors") or []) if p]
+    if processors:
+        # Check if any processors reference .mkape files
+        mkape_processors = [
+            p for p in processors
+            if (p.get("Executable") or "").endswith(".mkape")
+        ]
+
+        # If we have .mkape references, process them as sub-modules
+        if mkape_processors:
+            for proc in mkape_processors:
+                mkape_name = proc.get("Executable") or ""
+                if not mkape_name:
+                    continue
+
+                # Strip the .mkape extension to get the module name
+                sub_name = mkape_name[:-6] if mkape_name.endswith(".mkape") else mkape_name
+
+                logging.info("    Executing: %s", mkape_name)
+
+                sub_files = find_module_files(modules_dir, sub_name)
+                if not sub_files:
+                    logging.warning("Sub-module '%s' not found", sub_name)
+                    continue
+
+                for sub_file in sub_files:
+                    try:
+                        sub_data = load_module(sub_file)
+                        run_module(
+                            sub_name,
+                            sub_data,
+                            sub_file,
+                            modules_dir,
+                            msource,
+                            mdest,
+                            mef,
+                            mvars,
+                            debug,
+                            processed_ids,
+                            dry_run,
+                            num_threads,
+                            platform_map,
+                        )
+                    except Exception as exc:  # noqa: BLE001
+                        logging.error(
+                            "Error in sub-module '%s': %s", sub_name, exc
+                        )
+            return
+
+    # ------------------------------------------------------------------
     # Regular module: select processor and execute
     # ------------------------------------------------------------------
     processor = get_processor(module_data, mef)

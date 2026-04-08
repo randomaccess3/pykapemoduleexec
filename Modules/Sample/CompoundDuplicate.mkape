@@ -1,0 +1,16 @@
+Description: Compound module that references the same sub-module twice
+Category: Sample
+Author: pykapetargetexec
+Version: 1.0
+Id: 00000000-0000-0000-0000-000000000014
+ExportFormat: txt
+
+Processors:
+    -
+        Executable: SubModule1.mkape
+        CommandLine: ""
+        ExportFormat: txt
+    -
+        Executable: SubModule1.mkape
+        CommandLine: ""
+        ExportFormat: txt
