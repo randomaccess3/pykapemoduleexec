@@ -1,0 +1,12 @@
+Description: Sub-module 1 for testing compound processors
+Category: Sample
+Author: pykapetargetexec
+Version: 1.0
+Id: 00000000-0000-0000-0000-000000000011
+ExportFormat: txt
+
+Processors:
+    -
+        Executable: echo
+        CommandLine: "SubModule1 executed: Source=%sourceDirectory%"
+        ExportFormat: txt
