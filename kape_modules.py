@@ -76,6 +76,45 @@ def _detect_platform() -> str:
 CURRENT_PLATFORM: str = _detect_platform()
 
 
+def _check_admin_privileges() -> bool:
+    """
+    Check if the script is running with administrative/root privileges.
+
+    Returns:
+        True if running with admin privileges, False otherwise.
+    """
+    if sys.platform == "win32":
+        # On Windows, check if the user has admin rights
+        try:
+            import ctypes
+            return ctypes.windll.shell32.IsUserAnAdmin() != 0
+        except Exception:  # noqa: BLE001
+            # If we can't determine admin status, assume not admin
+            return False
+    else:
+        # On Unix-like systems, check if running as root (UID 0)
+        try:
+            return os.geteuid() == 0
+        except AttributeError:
+            # os.geteuid() doesn't exist on Windows
+            return False
+
+
+def check_and_warn_admin_privileges() -> None:
+    """
+    Check if the script is running with administrative privileges.
+
+    If not running as admin, print a warning message to stderr.
+    """
+    if not _check_admin_privileges():
+        warning_message = (
+            "WARNING: Not running with administrative privileges. "
+            "Some module executions may fail or produce incomplete results."
+        )
+        print(f"\n{warning_message}\n", file=sys.stderr)
+        logging.warning(warning_message)
+
+
 def load_platform_map(map_path: Optional[Path] = None) -> dict:
     """
     Load a platform mapping YAML file.
@@ -1073,6 +1112,9 @@ def main(argv: Optional[List[str]] = None) -> None:
     # Ensure root logger level is set even when basicConfig is a no-op
     # (e.g. when handlers were already configured by a test harness).
     logging.getLogger().setLevel(logging.DEBUG if args.debug else logging.INFO)
+
+    # Check for administrative privileges and warn if not running as admin
+    check_and_warn_admin_privileges()
 
     script_dir = Path(__file__).parent.resolve()
     modules_dir = get_modules_dir(script_dir, args.mpath)
