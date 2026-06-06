@@ -24,6 +24,20 @@
 # Examples:
 #
 executables:
+  appcompatcacheparser.exe:
+    linux:
+      executable: dotnet
+      command_line: "appcompatcacheparser.dll {original_args}"
+    darwin:
+      executable: dotnet
+      command_line: "appcompatcacheparser.dll {original_args}"
+  amcacheparser.exe:
+    linux:
+      executable: dotnet
+      command_line: "amcacheparser.dll {original_args}"
+    darwin:
+      executable: dotnet
+      command_line: "amcacheparser.dll {original_args}"
   pecmd.exe:
     linux:
       executable: dotnet
@@ -45,13 +59,27 @@ executables:
     darwin:
       executable: dotnet
       command_line: "LECmd.dll {original_args}"
-  mecmd.exe:
+  jlecmd.exe:
+    linux:
+      executable: dotnet
+      command_line: "JLECmd.dll {original_args}"
+    darwin:
+      executable: dotnet
+      command_line: "JLECmd.dll {original_args}"
+  mftecmd.exe:
     linux:
       executable: dotnet
       command_line: "MFTECmd.dll {original_args}"
     darwin:
       executable: dotnet
       command_line: "MFTECmd.dll {original_args}"
+  recmd.exe:
+    linux:
+      executable: dotnet
+      command_line: "RECmd.dll {original_args}"
+    darwin:
+      executable: dotnet
+      command_line: "RECmd.dll {original_args}"
   recentfilecacheparser.exe:
     linux:
       executable: dotnet
@@ -73,3 +101,11 @@ executables:
     darwin:
       executable: dotnet
       command_line: "SumECmd.dll {original_args}"
+  WxTCmd.exe:
+    linux:
+      executable: dotnet
+      command_line: "WxTCmd.dll {original_args}"
+    darwin:
+      executable: dotnet
+      command_line: "WxTCmd.dll {original_args}"
+      
