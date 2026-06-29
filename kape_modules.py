@@ -33,6 +33,7 @@ import subprocess
 import sys
 import tempfile
 import traceback
+import urllib.parse
 import urllib.request
 import uuid
 import zipfile
@@ -322,17 +323,28 @@ def find_matching_files(source_path: Path, file_mask: str) -> List[Path]:
       (e.g. ``regex:(2019|DSC).+\\.jpg``).
     """
     results: List[Path] = []
-    if file_mask.startswith("regex:"):
-        pattern = r"\A" + file_mask[6:].strip() + r"\z"
-        regex = re.compile(pattern, re.IGNORECASE)
-        for f in source_path.rglob("*"):
-            if f.is_file() and regex.match(f.name):
+    seen: Set[Path] = set()
+    masks = [part.strip() for part in file_mask.split("|") if part.strip()]
+    if not masks:
+        masks = [file_mask]
+
+    for raw_mask in masks:
+        mask = urllib.parse.unquote(raw_mask)
+        if mask.startswith("regex:"):
+            pattern = r"\A" + mask[6:].strip() + r"\z"
+            regex = re.compile(pattern, re.IGNORECASE)
+            for f in source_path.rglob("*"):
+                if f.is_file() and regex.match(f.name) and f not in seen:
+                    seen.add(f)
+                    results.append(f)
+            continue
+
+        glob_mask = mask.lstrip("\\/")
+        for f in source_path.rglob(glob_mask):
+            if f.is_file() and f not in seen:
+                seen.add(f)
                 results.append(f)
-    else:
-        mask = file_mask.lstrip("\\/")
-        for f in source_path.rglob(mask):
-            if f.is_file():
-                results.append(f)
+
     return results
 
 
