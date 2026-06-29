@@ -28,3 +28,13 @@ def test_filemask_supports_pipe_separated_globs_and_url_encoded_values(tmp_path)
     )
 
     assert {p.name for p in matches} == {p.name for p in expected}
+
+
+def test_filemask_with_only_empty_pipe_entries_returns_no_matches(tmp_path):
+    src = tmp_path / "source"
+    src.mkdir()
+    (src / "file.txt").write_text("x")
+
+    matches = kape_modules.find_matching_files(src, " | || ")
+
+    assert matches == []

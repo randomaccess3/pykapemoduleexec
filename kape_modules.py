@@ -326,7 +326,7 @@ def find_matching_files(source_path: Path, file_mask: str) -> List[Path]:
     seen: Set[Path] = set()
     masks = [part.strip() for part in file_mask.split("|") if part.strip()]
     if not masks:
-        masks = [file_mask]
+        return results
 
     for raw_mask in masks:
         mask = urllib.parse.unquote(raw_mask)
