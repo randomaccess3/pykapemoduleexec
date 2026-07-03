@@ -84,7 +84,6 @@ in one of these locations **before** running:
 kape_modules.py --msource PATH --mdest PATH --module NAMES [options]
 kape_modules.py --mlist [--mdetail] [--mpath PATH]
 kape_modules.py --msync [URL] [--mpath PATH]
-kape_modules.py --msync [--mpath PATH]
 ```
 
 ### Arguments
@@ -99,8 +98,12 @@ kape_modules.py --msync [--mpath PATH]
 | `--mpath PATH` | Path to the Modules directory (default: `./Modules`) |
 | `--mlist` | List available modules and exit |
 | `--mdetail` | Show full module details including binary status (use with `--mlist`) |
+| `--dry-run` | Show what would be executed without running commands |
+| `--mthreads N` | Number of worker threads for concurrent execution (default: `1`) |
+| `--post-process NAMES` | Comma-separated list of modules to run after `--module` modules complete, using `--mdest` as source |
 | `--msync [URL]` | Sync modules from the KapeFiles GitHub repository and exit. Optionally provide a URL to a custom fork's zip archive |
-| `--msync` | Sync modules from the KapeFiles GitHub repository and exit |
+| `--platform-map PATH` | Path to a `platform_map.yaml` mapping Windows executables to platform-specific equivalents |
+| `--mflush`, `--no-mflush` | Enable/disable clearing `--mdest` before processing (default: enabled) |
 | `--debug` | Enable verbose debug output |
 
 ### Examples
@@ -120,6 +123,15 @@ python kape_modules.py \
     --mdest   /tmp/output \
     --module  EvtxECmd,PECmd \
     --mef     csv
+```
+
+**Run modules and then post-process the output:**
+```bash
+python kape_modules.py \
+    --msource /mnt/evidence \
+    --mdest   /tmp/output \
+    --module  EvtxECmd,PECmd \
+    --post-process "TimelineExplorer,ArchiveReport"
 ```
 
 **Pass custom variables to a module:**
