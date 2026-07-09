@@ -1,4 +1,4 @@
-# pykapetargetexec
+# pykapemoduleexec
 
 Python runner for KAPE modules — a Python implementation of the
 [KAPE](https://ericzimmerman.github.io/KapeDocs/#!index.md) Module component.
