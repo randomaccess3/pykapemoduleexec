@@ -434,12 +434,15 @@ def _build_command_string(executable: str, cmdline: str) -> str:
 
 def _execution_cwd(executable: str) -> Optional[str]:
     """Return executable parent directory when *executable* points to a file path."""
-    exe = executable.strip().strip('"')
+    exe = executable.strip().strip("'\"")
     if not exe:
         return None
     exe_path = Path(exe)
-    if exe_path.is_file():
-        return str(exe_path.resolve().parent)
+    try:
+        if exe_path.is_file():
+            return str(exe_path.resolve().parent)
+    except OSError:
+        return None
     return None
 
 
