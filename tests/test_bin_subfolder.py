@@ -192,6 +192,7 @@ class TestRunModuleWithSubfolder:
         cmd_str = mock_run.call_args[0][0]
         expected_exe = str(modules / "bin" / "pecmd" / "pecmd.exe")
         assert expected_exe in cmd_str
+        assert mock_run.call_args.kwargs.get("cwd") == str(modules / "bin" / "pecmd")
 
     @patch("kape_modules.CURRENT_PLATFORM", "linux")
     @patch("subprocess.run")
