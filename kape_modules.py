@@ -432,6 +432,17 @@ def _build_command_string(executable: str, cmdline: str) -> str:
     return f"{executable} {cmdline}"
 
 
+def _execution_cwd(executable: str) -> Optional[str]:
+    """Return executable parent directory when *executable* points to a file path."""
+    exe = executable.strip().strip('"')
+    if not exe:
+        return None
+    exe_path = Path(exe)
+    if exe_path.is_file():
+        return str(exe_path.resolve().parent)
+    return None
+
+
 def execute_command(
     executable: str,
     cmdline: str,
@@ -465,6 +476,13 @@ def execute_command(
     logging.info("    Executing: %s", full_cmd)
 
     timeout_secs: Optional[float] = (wait_timeout * 60) if wait_timeout > 0 else None
+    execution_cwd = _execution_cwd(executable)
+    run_kwargs = {
+        "shell": True,
+        "timeout": timeout_secs,
+    }
+    if execution_cwd:
+        run_kwargs["cwd"] = execution_cwd
 
     try:
         if export_file:
@@ -477,10 +495,9 @@ def execute_command(
             if debug:
                 result = subprocess.run(
                     full_cmd,
-                    shell=True,
+                    **run_kwargs,
                     stdout=subprocess.PIPE,
                     stderr=subprocess.PIPE,
-                    timeout=timeout_secs,
                 )
                 stdout_text = result.stdout.decode("utf-8", errors="replace") if result.stdout else ""
                 stderr_text = result.stderr.decode("utf-8", errors="replace") if result.stderr else ""
@@ -496,19 +513,17 @@ def execute_command(
                 with open(export_path, file_mode, encoding="utf-8", errors="replace") as fout:
                     result = subprocess.run(
                         full_cmd,
-                        shell=True,
+                        **run_kwargs,
                         stdout=fout,
                         stderr=fout,
-                        timeout=timeout_secs,
                     )
             logging.info("    Output written to: %s", export_path)
         else:
             result = subprocess.run(
                 full_cmd,
-                shell=True,
+                **run_kwargs,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
-                timeout=timeout_secs,
             )
             if debug:
                 stdout_text = result.stdout.decode("utf-8", errors="replace") if result.stdout else ""
