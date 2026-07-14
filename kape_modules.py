@@ -434,7 +434,9 @@ def _build_command_string(executable: str, cmdline: str) -> str:
 
 def _execution_cwd(executable: str) -> Optional[str]:
     """Return executable parent directory when *executable* points to a file path."""
-    exe = executable.strip().strip("'\"")
+    exe = executable.strip()
+    while len(exe) >= 2 and exe[0] == exe[-1] and exe[0] in ("'", '"'):
+        exe = exe[1:-1].strip()
     if not exe:
         return None
     exe_path = Path(exe)
