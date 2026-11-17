@@ -27,24 +27,24 @@ executables:
   appcompatcacheparser.exe:
     linux:
       executable: dotnet
-      command_line: "appcompatcacheparser.dll {original_args}"
+      command_line: "AppCompatCacheParser.dll {original_args}"
     darwin:
       executable: dotnet
-      command_line: "appcompatcacheparser.dll {original_args}"
+      command_line: "AppCompatCacheParser.dll {original_args}"
   amcacheparser.exe:
     linux:
       executable: dotnet
-      command_line: "amcacheparser.dll {original_args}"
+      command_line: "AmcacheParser.dll {original_args}"
     darwin:
       executable: dotnet
-      command_line: "amcacheparser.dll {original_args}"
+      command_line: "AmcacheParser.dll {original_args}"
   pecmd.exe:
     linux:
       executable: dotnet
-      command_line: "pecmd.dll {original_args}"
+      command_line: "PECmd.dll {original_args}"
     darwin:
       executable: dotnet
-      command_line: "pecmd.dll {original_args}"
+      command_line: "PECmd.dll {original_args}"
   evtxecmd.exe:
     linux:
       executable: dotnet
@@ -87,6 +87,18 @@ executables:
     darwin:
       executable: dotnet
       command_line: "RecentFileCacheParser.dll {original_args}"
+  rbcmd.exe:
+    linux:
+      executable: dotnet
+      command_line: "RBCmd.dll {original_args}"
+  sqlecmd.exe:
+    linux:
+      executable: dotnet
+      command_line: "SQLECmd.dll {original_args}"
+  srumecmd.exe:
+    linux:
+      executable: dotnet
+      command_line: "SrumECmd.dll {original_args}"
   sbecmd.exe:
     linux:
       executable: dotnet

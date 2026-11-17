@@ -2,6 +2,7 @@
 
 import logging
 import os
+import shlex
 from pathlib import Path
 from unittest.mock import patch
 
@@ -169,6 +170,29 @@ class TestLoadPlatformMap:
         result = kape_modules.load_platform_map(empty)
         assert result == {}
 
+    @pytest.mark.parametrize(
+        "executable,dll",
+        [
+            ("AppCompatCacheParser.exe", "AppCompatCacheParser.dll"),
+            ("AmcacheParser.exe", "AmcacheParser.dll"),
+            ("PECmd.exe", "PECmd.dll"),
+            ("RBCmd.exe", "RBCmd.dll"),
+            ("SQLECmd.exe", "SQLECmd.dll"),
+            ("SrumECmd.exe", "SrumECmd.dll"),
+        ],
+    )
+    def test_shipped_linux_mapping_preserves_dll_case(self, executable, dll):
+        platform_map = kape_modules.load_platform_map(
+            Path(kape_modules.__file__).with_name("platform_map.yaml")
+        )
+
+        exe, cmd = kape_modules.apply_platform_mapping(
+            executable, "--help", platform_map, current_platform="linux"
+        )
+
+        assert exe == "dotnet"
+        assert cmd == f"{dll} --help"
+
 
 # ---------------------------------------------------------------------------
 # Tests: apply_platform_mapping
@@ -264,7 +288,8 @@ class TestApplyPlatformMapping:
             platform_map_data, current_platform="linux",
         )
         assert exe == "dotnet"
-        assert cmd == "/path/to/Modules/bin/pecmd.dll -d /src --csv /dst"
+        expected_dll = shlex.quote(os.path.join("/path/to/Modules/bin", "pecmd.dll"))
+        assert cmd == f"{expected_dll} -d /src --csv /dst"
 
     def test_full_path_with_spaces_quotes_dll(self, platform_map_data):
         """When the exe directory contains spaces, the resolved DLL path must
@@ -275,7 +300,10 @@ class TestApplyPlatformMapping:
         )
         assert exe == "dotnet"
         # The DLL path should be quoted because it contains spaces
-        assert "'/Users/John Smith/Modules/bin/pecmd.dll'" in cmd
+        expected_dll = shlex.quote(
+            os.path.join("/Users/John Smith/Modules/bin", "pecmd.dll")
+        )
+        assert expected_dll in cmd
         assert cmd.endswith("-d /src --csv /dst")
 
     def test_bare_name_keeps_relative_dll(self, platform_map_data):
@@ -285,6 +313,25 @@ class TestApplyPlatformMapping:
         )
         assert exe == "dotnet"
         assert cmd == "pecmd.dll -d /src"
+
+    def test_windows_batch_path_is_normalized_without_changing_regex(self):
+        mapping = {
+            "executables": {
+                "RECmd.exe": {
+                    "linux": {
+                        "executable": "dotnet",
+                        "command_line": "RECmd.dll {original_args}",
+                    }
+                }
+            }
+        }
+
+        _, cmd = kape_modules.apply_platform_mapping(
+            "RECmd.exe", r"--bn BatchExamples\DFIRBatch.reb --regex '\d+'",
+            mapping, current_platform="linux",
+        )
+
+        assert cmd == r"RECmd.dll --bn BatchExamples/DFIRBatch.reb --regex '\d+'"
 
     def test_no_command_line_full_path_preserves_args(self, platform_map_data):
         """When command_line is absent, original args are kept even with a full
@@ -310,6 +357,51 @@ class TestCurrentPlatform:
 
     def test_platform_in_expected_values(self):
         assert kape_modules.CURRENT_PLATFORM in ("windows", "linux", "darwin")
+
+
+@pytest.mark.parametrize("platform", ["linux", "darwin"])
+def test_command_line_quotes_posix_paths_and_normalizes_suffix(platform):
+    variables = {
+        "sourceFile": "/mnt/e/Some Folder/$MFT",
+        "sourceDirectory": "/mnt/e",
+        "destinationDirectory": "/mnt/g/Output Folder",
+    }
+    with patch("kape_modules.CURRENT_PLATFORM", platform):
+        cmd = kape_modules.build_command_line(
+            r'-f "%sourceFile%" -d %sourceDirectory%\Windows --csv %destinationDirectory%',
+            variables,
+        )
+
+    assert cmd == (
+        "-f '/mnt/e/Some Folder/$MFT' -d /mnt/e/Windows "
+        "--csv '/mnt/g/Output Folder'"
+    )
+
+
+def test_command_line_quotes_windows_paths_without_double_quoting():
+    variables = {
+        "sourceFile": r"E:\Some Folder\$MFT",
+        "destinationDirectory": r"G:\Output Folder",
+    }
+    with patch("kape_modules.CURRENT_PLATFORM", "windows"):
+        cmd = kape_modules.build_command_line(
+            '-f "%sourceFile%" --csv %destinationDirectory%', variables
+        )
+
+    assert cmd == r'-f "E:\Some Folder\$MFT" --csv "G:\Output Folder"'
+
+
+def test_mapping_preserves_shell_quoted_path_with_apostrophe(platform_map_data):
+    with patch("kape_modules.CURRENT_PLATFORM", "linux"):
+        cmdline = kape_modules.build_command_line(
+            "-f %sourceFile%", {"sourceFile": "/mnt/e/John's Folder/$MFT"}
+        )
+
+    _, cmd = kape_modules.apply_platform_mapping(
+        "pecmd.exe", cmdline, platform_map_data, current_platform="linux"
+    )
+
+    assert shlex.split(cmd) == ["pecmd.dll", "-f", "/mnt/e/John's Folder/$MFT"]
 
 
 # ---------------------------------------------------------------------------

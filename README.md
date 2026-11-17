@@ -49,6 +49,105 @@ Modules/
 You can also keep the Modules directory anywhere and point to it with
 `--mpath`.
 
+### Comparing with an installed KAPE instance
+
+Use the same installed modules and binaries for both runners. The community
+compound module `!EZParser` references the EZTools parsers, including tools
+in subdirectories of `Modules/bin`. It is not included in this repository's
+sample modules.
+
+```powershell
+& 'C:\Forensic_Program_Files\Acquisition\kape\kape.exe' `
+    --msource E:\ --mdest G:\comparison\kape-E-csv --module '!EZParser'
+
+python kape_modules.py `
+    --msource E:\ --mdest G:\comparison\python-E-csv --module '!EZParser' `
+    --mpath C:\Forensic_Program_Files\Acquisition\kape\Modules --no-mflush --debug
+```
+
+Repeat with `C:\` and separate destinations to test the live system.
+Keep output **outside the source drive** so recursive parsers do not process
+earlier runs. Live system artifacts can change between runs; a mounted,
+unchanging evidence drive is better for exact comparisons.
+FileMask processing uses directory enumeration, like KAPE. Hidden NTFS
+metadata streams such as a drive's live `$MFT` are not added simply because
+their paths can be opened; collected copies of those files are still matched.
+Directory junctions and directory symlinks are not traversed, preventing the
+same artifacts from being processed again through an alias. Directory
+enumeration failures are logged rather than silently treated as an empty source.
+
+Only one export processor runs per module. Use separate `--mef json` runs
+for JSON-capable modules; modules without that format fall back to their
+default processor. `ExportFile` captures console text independently of
+CSV/JSON exports. Compare parsed records rather than timestamped filenames,
+row order, or console logs.
+
+A zero runner exit code does not guarantee every parser succeeded. Check
+processor warnings and console errors before accepting an output as a baseline.
+Some JSON exports include parser-generated `InternalId` GUIDs that change even
+on identical input. Classify these separately from evidence metadata such as
+`SourceAccessed`; neither difference is strict record equality.
+
+### Running EZTools natively in WSL
+
+WSL needs its own Python 3.9+ with PyYAML and a **Linux** .NET runtime matching
+the installed tools' `.runtimeconfig.json` files. Windows Python and
+`dotnet.exe` are not native Linux equivalents.
+
+Run the setup helper **inside WSL** to check the recommended Python 3.13,
+.NET 10 runtime, and PyYAML:
+
+```bash
+bash setup_wsl.sh
+```
+
+It asks before installing missing components. `--check` only checks and
+returns nonzero if setup is incomplete; `--yes` accepts installation prompts.
+Existing compatible installations are reused rather than reinstalled.
+For unattended installs, run `sudo -v` first if elevated package installation
+will be needed; `--yes` does not bypass sudo authentication.
+
+Python 3.13 is built from the latest stable 3.13 source release on
+**python.org**, without replacing Ubuntu's system Python. Missing compiler
+and library dependencies are installed through APT, which may require `sudo`.
+PyYAML comes from its official PyPI release in a dedicated virtual environment.
+.NET is installed using `sudo apt-get update` followed by
+`sudo apt-get install -y aspnetcore-runtime-10.0`; this includes the core
+runtime required by the installed EZTools.
+
+Ubuntu 20.04's default repositories do **not** contain that .NET package.
+The helper reports APT failures rather than silently switching installers
+or adding repositories. A supported Ubuntu release/feed is needed for that
+installation path. See Microsoft's
+[Ubuntu installation guide](https://learn.microsoft.com/en-us/dotnet/core/install/linux-ubuntu).
+
+Local installations default to
+`~/.local/share/pykapemoduleexec` (`--prefix` overrides this).
+On success, the helper prints the Python command and `DOTNET_ROOT`/`PATH`
+exports to use in the current shell; it does not edit shell startup files.
+Use that reported Python path instead of `python3` below if the distribution's
+default Python is older than the project requires.
+
+```bash
+python3 kape_modules.py \
+    --msource /mnt/e --mdest /mnt/g/comparison/wsl-E-csv \
+    --module '!EZParser' \
+    --mpath /mnt/c/Forensic_Program_Files/Acquisition/kape/Modules \
+    --no-mflush --debug
+```
+
+The default platform map runs mapped DLLs with `dotnet`. DLL names must
+match their actual case on case-sensitive filesystems. Windows-style
+executable subdirectories and EZTools path arguments are translated to native
+paths, and the original binary directory remains the working directory so
+relative maps and batch files can be found.
+
+A mapping is not a guarantee that a tool can parse artifacts on Linux.
+In particular, SumECmd and SrumECmd require Windows ESE libraries for parsing.
+Their native runs can fail even though `--help` works. Inspect tool errors and
+generated files, not just the runner's exit code: processor failures are
+currently logged without making the overall runner exit nonzero.
+
 ### Syncing modules
 
 Use `--msync` to automatically download the latest module files from the
