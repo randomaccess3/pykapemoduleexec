@@ -29,6 +29,7 @@ import os
 import re
 import shlex
 import shutil
+import stat
 import subprocess
 import sys
 import tempfile
@@ -39,7 +40,7 @@ import uuid
 import zipfile
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
-from typing import Dict, List, Optional, Set, Tuple
+from typing import Dict, Iterator, List, Optional, Set, Tuple
 
 try:
     import yaml
@@ -201,6 +202,17 @@ def apply_platform_mapping(
     new_cmdline_template: Optional[str] = platform_entry.get("command_line")
 
     if new_cmdline_template is not None:
+        # Module definitions use Windows separators, including relative batch paths.
+        cmdline = re.sub(
+            r"""(?<!\S)(-d|-f|--bn|--csv|--json|--html|--xml)(\s+)("[^"]*"|'[^']*'|\S+)""",
+            lambda match: (
+                match[0] if "\\" not in match[3] else (
+                    match[1] + match[2]
+                    + shlex.quote(match[3].strip("\"'").replace("\\", "/"))
+                )
+            ),
+            cmdline,
+        )
         new_cmdline = new_cmdline_template.replace("{original_args}", cmdline)
         # When the original executable was resolved to a full path (e.g.
         # by find_executable()), resolve relative file references in the
@@ -313,6 +325,31 @@ def get_processor(module_data: dict, export_format: Optional[str]) -> Optional[d
 # ---------------------------------------------------------------------------
 
 
+def _iter_source_files(source_path: Path) -> Iterator[Path]:
+    def report_error(error: OSError) -> None:
+        logging.warning("Cannot enumerate source path '%s': %s", error.filename, error)
+
+    for directory, subdirectories, filenames in os.walk(
+        source_path, followlinks=False, onerror=report_error
+    ):
+        if os.name == "nt":
+            for name in subdirectories[:]:
+                child = Path(directory) / name
+                try:
+                    is_junction = (
+                        os.lstat(child).st_reparse_tag
+                        == stat.IO_REPARSE_TAG_MOUNT_POINT
+                    )
+                except OSError as error:
+                    report_error(error)
+                    subdirectories.remove(name)
+                    continue
+                if is_junction:
+                    subdirectories.remove(name)
+        for name in filenames:
+            yield Path(directory) / name
+
+
 def find_matching_files(source_path: Path, file_mask: str) -> List[Path]:
     """
     Return all files under *source_path* that match *file_mask*.
@@ -331,17 +368,17 @@ def find_matching_files(source_path: Path, file_mask: str) -> List[Path]:
     for raw_mask in masks:
         mask = urllib.parse.unquote(raw_mask)
         if mask.startswith("regex:"):
-            pattern = r"\A" + mask[6:].strip() + r"\z"
+            pattern = r"\A" + mask[6:].strip() + r"\Z"
             regex = re.compile(pattern, re.IGNORECASE)
-            for f in source_path.rglob("*"):
+            for f in _iter_source_files(source_path):
                 if f.is_file() and regex.match(f.name) and f not in seen:
                     seen.add(f)
                     results.append(f)
             continue
 
         glob_mask = mask.lstrip("\\/")
-        for f in source_path.rglob(glob_mask):
-            if f.is_file() and f not in seen:
+        for f in _iter_source_files(source_path):
+            if f.match(glob_mask) and f.is_file() and f not in seen:
                 seen.add(f)
                 results.append(f)
 
@@ -362,6 +399,7 @@ def find_executable(executable: str, modules_dir: Path, module_name: str) -> str
     3. ``<modules_dir>/bin/<stem>/<executable>``  (subfolder named after the binary)
     4. The name as-is (rely on the system PATH / absolute path).
     """
+    executable = executable.replace("\\", os.sep)
     named_dir = modules_dir / module_name / executable
     if named_dir.exists():
         return str(named_dir)
@@ -387,6 +425,22 @@ def substitute_variables(text: str, variables: Dict[str, str]) -> str:
     for key, value in variables.items():
         text = text.replace(f"%{key}%", str(value))
     return text
+
+
+def build_command_line(template: str, variables: Dict[str, str]) -> str:
+    """Substitute and quote path variables using the execution platform's rules."""
+    def _replace_path(match: re.Match) -> str:
+        path = substitute_variables(match["path"], variables)
+        if CURRENT_PLATFORM == "windows":
+            return subprocess.list2cmdline([path])
+        return shlex.quote(path.replace("\\", "/"))
+
+    template = re.sub(
+        r"""(?P<quote>["']?)(?P<path>%(?:sourceDirectory|destinationDirectory|sourceFile|kapeDirectory)%[^\s"']*)(?P=quote)""",
+        _replace_path,
+        template,
+    )
+    return substitute_variables(template, variables)
 
 
 def build_base_vars(
@@ -457,6 +511,7 @@ def execute_command(
     wait_timeout: int,
     debug: bool,
     dry_run: bool = False,
+    cwd: Optional[str] = None,
 ) -> None:
     """
     Run *executable* with *cmdline*.
@@ -481,7 +536,7 @@ def execute_command(
     logging.info("    Executing: %s", full_cmd)
 
     timeout_secs: Optional[float] = (wait_timeout * 60) if wait_timeout > 0 else None
-    execution_cwd = _execution_cwd(executable)
+    execution_cwd = cwd or _execution_cwd(executable)
     run_kwargs = {
         "shell": True,
         "timeout": timeout_secs,
@@ -756,10 +811,11 @@ def run_module(
             except ValueError:
                 file_vars["sourceDirectoryBase"] = ""
 
-            cmdline = substitute_variables(cmdline_template, file_vars)
+            cmdline = build_command_line(cmdline_template, file_vars)
             exe = find_executable(executable_name, modules_dir, module_name)
+            cwd = _execution_cwd(exe)
             exe, cmdline = apply_platform_mapping(exe, cmdline, platform_map or {})
-            execute_command(exe, cmdline, dest_dir, export_file, append, wait_timeout, debug, dry_run)
+            execute_command(exe, cmdline, dest_dir, export_file, append, wait_timeout, debug, dry_run, cwd=cwd)
 
         if num_threads > 1:
             with ThreadPoolExecutor(max_workers=num_threads) as executor:
@@ -779,10 +835,11 @@ def run_module(
             for source_file in matching_files:
                 _process_file(source_file)
     else:
-        cmdline = substitute_variables(cmdline_template, base_vars)
+        cmdline = build_command_line(cmdline_template, base_vars)
         exe = find_executable(executable_name, modules_dir, module_name)
+        cwd = _execution_cwd(exe)
         exe, cmdline = apply_platform_mapping(exe, cmdline, platform_map or {})
-        execute_command(exe, cmdline, dest_dir, export_file, append, wait_timeout, debug, dry_run)
+        execute_command(exe, cmdline, dest_dir, export_file, append, wait_timeout, debug, dry_run, cwd=cwd)
 
 
 # ---------------------------------------------------------------------------
@@ -816,7 +873,7 @@ def list_modules(modules_dir: Path, detail: bool = False) -> None:
             print(f"BinaryUrl   : {data.get('BinaryUrl', 'N/A')}")
             processors = [p for p in (data.get("Processors") or []) if p]
             for idx, proc in enumerate(processors):
-                exe = proc.get("Executable", "")
+                exe = proc.get("Executable", "").replace("\\", os.sep)
                 named_ok = (modules_dir / mkape.stem / exe).exists()
                 bin_ok = (modules_dir / "bin" / exe).exists()
                 bin_sub_ok = (modules_dir / "bin" / Path(exe).stem / exe).exists()

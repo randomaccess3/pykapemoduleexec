@@ -76,6 +76,17 @@ class TestFindExecutableBinSubfolder:
         result = kape_modules.find_executable("missing.exe", modules_dir, "SomeModule")
         assert result == "missing.exe"
 
+    def test_windows_subdirectory_separator(self, modules_dir):
+        sub = modules_dir / "bin" / "EvtxECmd"
+        sub.mkdir()
+        (sub / "EvtxECmd.exe").write_text("")
+
+        result = kape_modules.find_executable(
+            r"EvtxECmd\EvtxECmd.exe", modules_dir, "EvtxECmd"
+        )
+
+        assert result == str(sub / "EvtxECmd.exe")
+
     def test_subfolder_case_sensitive_stem(self, modules_dir):
         """Subfolder lookup uses the stem of the executable filename."""
         sub = modules_dir / "bin" / "LECmd"
@@ -240,3 +251,6 @@ class TestRunModuleWithSubfolder:
         assert "dotnet" in cmd_str
         expected_dll = str(modules / "bin" / "pecmd" / "pecmd.dll")
         assert expected_dll in cmd_str
+        assert mock_run.call_args.kwargs["cwd"] == str(
+            modules / "bin" / "pecmd"
+        )
